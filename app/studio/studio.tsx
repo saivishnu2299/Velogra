@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -280,10 +281,11 @@ export default function Studio() {
     [active, setActive] = useState("sketch.js"),
     [modal, setModal] = useState<Modal>(null),
     [savedProjects, setSavedProjects] = useState<Project[]>([]);
-  const [view, setView] = useState<"split" | "canvas" | "code">("split"),
+  const [view, setView] = useState<"split" | "canvas" | "code">("canvas"),
     [mobile, setMobile] = useState(false),
     [autoRun, setAutoRun] = useState(false),
-    [fontSize, setFontSize] = useState(14);
+    [fontSize, setFontSize] = useState(14),
+    [reduceMotion, setReduceMotion] = useState(false);
   const [source, setSource] = useState(""),
     [runState, setRunState] = useState<
       "loading" | "running" | "paused" | "stopped" | "error"
@@ -303,6 +305,49 @@ export default function Studio() {
     projectRef = useRef<Project | null>(null),
     logId = useRef(0),
     consoleEnd = useRef<HTMLDivElement>(null);
+  const canvasBounds = useRef<DOMRect | null>(null);
+  const canvasMotion = useRef<Animation | null>(null);
+  const changeView = (
+    next:
+      | "split"
+      | "canvas"
+      | "code"
+      | ((current: "split" | "canvas" | "code") => "split" | "canvas" | "code"),
+  ) => {
+    canvasBounds.current = iframe.current?.getBoundingClientRect() ?? null;
+    canvasMotion.current?.cancel();
+    setView(next);
+  };
+  useLayoutEffect(() => {
+    const before = canvasBounds.current;
+    canvasBounds.current = null;
+    const frame = iframe.current;
+    if (
+      !frame ||
+      !before ||
+      !before.width ||
+      reduceMotion ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    )
+      return;
+    const after = frame.getBoundingClientRect();
+    if (!after.width || !after.height) return;
+    canvasMotion.current = frame.animate(
+      [
+        {
+          transform: `translate(${before.x - after.x}px, ${before.y - after.y}px) scale(${before.width / after.width}, ${before.height / after.height})`,
+          transformOrigin: "0 0",
+        },
+        { transform: "translate(0, 0) scale(1)", transformOrigin: "0 0" },
+      ],
+      { duration: 360, easing: "cubic-bezier(0.16,1,0.3,1)" },
+    );
+    return () => canvasMotion.current?.cancel();
+  }, [view, reduceMotion]);
+  useEffect(() => {
+    document.documentElement.classList.toggle("reduce-motion", reduceMotion);
+    return () => document.documentElement.classList.remove("reduce-motion");
+  }, [reduceMotion]);
   const [lastRun, setLastRun] = useState("");
   useEffect(() => {
     projectRef.current = project;
@@ -359,7 +404,9 @@ export default function Studio() {
     const mq = window.matchMedia("(max-width: 820px)");
     const size = () => {
       setMobile(mq.matches);
-      setView(mq.matches ? "canvas" : "split");
+      setView((v) =>
+        mq.matches ? (v === "split" ? "code" : v) : v === "code" ? "split" : v,
+      );
     };
     queueMicrotask(size);
     mq.addEventListener("change", size);
@@ -367,6 +414,9 @@ export default function Studio() {
       try {
         setDark(localStorage.getItem("canvas-theme") === "dark");
         setAutoRun(localStorage.getItem("canvas-autorun") === "true");
+        setReduceMotion(
+          localStorage.getItem("velogra-reduce-motion") === "true",
+        );
       } catch {}
     });
     readProjects()
@@ -934,7 +984,7 @@ export default function Studio() {
         setDark((d) => !d);
         break;
       case "Canvas focus":
-        setView((v) => (v === "canvas" ? "split" : "canvas"));
+        changeView((v) => (v === "canvas" ? "split" : "canvas"));
         break;
       case "Export HTML":
         exportHTML();
@@ -1229,13 +1279,13 @@ export default function Studio() {
       <div className="panel-bar">
         <div className="canvas-title">
           <FrameCornersIcon size={18} />
-          <span>Canvas</span>
+          <span>Your canvas</span>
           <span className={`run-label ${runState}`}>
             <i />
             {runState === "loading"
               ? "Starting"
               : runState === "error"
-                ? "Check console"
+                ? "Check messages"
                 : runState.charAt(0).toUpperCase() + runState.slice(1)}
           </span>
         </div>
@@ -1258,16 +1308,29 @@ export default function Studio() {
           >
             <ImageIcon size={17} />
           </IconButton>
-          <IconButton
-            label={view === "canvas" ? "Show editor" : "Focus on canvas"}
-            onClick={() =>
-              setView(
-                view === "canvas" ? (mobile ? "code" : "split") : "canvas",
-              )
-            }
-          >
-            <FrameCornersIcon size={17} />
-          </IconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="icon-button" aria-label="Canvas tools">
+                <DotsThreeIcon size={22} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setConsoleOpen(!consoleOpen)}>
+                Sketch messages
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={run}>Restart sketch</DropdownMenuItem>
+              <DropdownMenuItem onSelect={stop} disabled={!source}>
+                Stop sketch
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setModal("settings")}>
+                Studio settings
+              </DropdownMenuItem>
+              <div className="canvas-metadata">
+                {stats.width} × {stats.height} ·{" "}
+                {runState === "paused" ? 0 : stats.fps} fps
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       <div className="preview-stage">
@@ -1280,6 +1343,10 @@ export default function Studio() {
             allow="fullscreen; autoplay; camera; microphone"
             srcDoc={source}
           />
+        ) : !ready || runState === "loading" ? (
+          <div className="canvas-loading" role="status" aria-live="polite">
+            <span>Opening your canvas…</span>
+          </div>
         ) : (
           <div className="stopped-canvas">
             <FrameCornersIcon size={40} weight="light" />
@@ -1312,11 +1379,15 @@ export default function Studio() {
               <SlidersHorizontalIcon size={17} /> Make it yours
             </span>
             <span>
-              {controls ? <CaretDownIcon size={14} /> : <PlusIcon size={14} />}
+              <CaretDownIcon className="controls-chevron" size={14} />
             </span>
           </button>
-          {controls && (
-            <>
+          <div
+            className={`controls-body ${controls ? "is-open" : ""}`}
+            aria-hidden={!controls}
+            inert={!controls}
+          >
+            <div>
               <div
                 className={`control-grid ${hasMotion ? "" : "two-controls"}`}
               >
@@ -1379,16 +1450,38 @@ export default function Studio() {
                 )}
               </div>
               <p className="canvas-tip">{currentTemplate.tip}</p>
-            </>
-          )}
+              <button className="next-idea" onClick={() => setModal("gallery")}>
+                Try another idea <CaretRightIcon size={14} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      <div className="console-bar">
+      {ready && (!currentTemplate || !supportsControls) && (
+        <div className="canvas-companion">
+          <h3>Follow your idea.</h3>
+          <p>
+            Open the code to add your own shapes, images, motion, and sound.
+          </p>
+          <button
+            className="outline-button"
+            onClick={() => changeView(mobile ? "code" : "split")}
+          >
+            Open code <CodeIcon size={16} />
+          </button>
+          <button className="next-idea" onClick={() => setModal("gallery")}>
+            Find a starting point <CaretRightIcon size={14} />
+          </button>
+        </div>
+      )}
+      <div
+        className={`console-bar ${!consoleOpen && !dirty && !errors ? "quiet" : ""}`}
+      >
         <button
           onClick={() => setConsoleOpen(!consoleOpen)}
           aria-expanded={consoleOpen}
         >
-          <TerminalIcon size={15} /> Console{" "}
+          <TerminalIcon size={15} /> Messages{" "}
           {errors > 0 && <span className="error-count">{errors}</span>}
           <CaretDownIcon
             size={12}
@@ -1436,7 +1529,7 @@ export default function Studio() {
   return (
     <TooltipProvider delayDuration={350}>
       <main
-        className={`studio ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
+        className={`studio view-${view} ${reduceMotion ? "reduce-motion" : ""} ${runState === "loading" ? "is-loading" : ""} ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
       >
         <header className="topbar">
           <div className="brand">
@@ -1452,7 +1545,7 @@ export default function Studio() {
               className="nav-button"
               onClick={() => setModal("reference")}
             >
-              Reference
+              Learn
             </button>
           </nav>
           <div className="top-actions">
@@ -1493,7 +1586,13 @@ export default function Studio() {
               label={dark ? "Switch to light mode" : "Switch to dark mode"}
               onClick={() => setDark(!dark)}
             >
-              {dark ? <SunIcon size={19} /> : <MoonIcon size={19} />}
+              <span
+                className={`theme-icons ${dark ? "is-dark" : ""}`}
+                aria-hidden="true"
+              >
+                <MoonIcon className="theme-moon" size={19} />
+                <SunIcon className="theme-sun" size={19} />
+              </span>
             </IconButton>
             <div className="toolbar-divider" />
             <DropdownMenu>
@@ -1538,16 +1637,61 @@ export default function Studio() {
             </IconButton>
           </div>
         </header>
-        <div className="mobile-bar">
-          <button onClick={() => void openProjects()}>
-            <FolderOpenIcon size={17} />
-            {project?.name ?? "Your sketch"}
-          </button>
+        <div className="workspace-bar">
+          <div className="sketch-heading">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="icon-button sketch-folder"
+                  aria-label="Sketch options"
+                >
+                  <FolderOpenIcon size={20} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => void openProjects()}>
+                  Open saved sketch
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => duplicate()}>
+                  Duplicate sketch
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setModal("gallery")}>
+                  Start a new sketch
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="sketch-heading-copy">
+              <input
+                className="workspace-name"
+                aria-label="Sketch name"
+                value={project?.name ?? ""}
+                placeholder="Your next idea"
+                onChange={(e) =>
+                  update((p) => ({ ...p, name: e.target.value.slice(0, 80) }))
+                }
+                onBlur={() => {
+                  if (!project?.name.trim())
+                    update((p) => ({ ...p, name: "Untitled sketch" }));
+                }}
+              />
+              <div
+                className="workspace-saved"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <CheckIcon size={11} />
+                {saved}
+              </div>
+            </div>
+          </div>
           <Tabs
-            value={view === "code" ? "code" : "canvas"}
-            onValueChange={(v) => setView(v as "code" | "canvas")}
+            value={view === "canvas" ? "canvas" : "code"}
+            onValueChange={(v) =>
+              changeView(v === "canvas" ? "canvas" : mobile ? "code" : "split")
+            }
           >
-            <TabsList>
+            <TabsList aria-label="Workspace view">
               <TabsTrigger value="canvas">Canvas</TabsTrigger>
               <TabsTrigger value="code">Code</TabsTrigger>
             </TabsList>
@@ -1560,62 +1704,9 @@ export default function Studio() {
           >
             <Sidebar collapsible="none" className="rail">
               <SidebarContent>
-                <SidebarGroup className="rail-header">
-                  <div className="section-label">
-                    WORKSPACE
-                    <IconButton
-                      label="New sketch"
-                      onClick={() => setModal("gallery")}
-                    >
-                      <PlusIcon size={16} />
-                    </IconButton>
-                  </div>
-                  <input
-                    className="project-title"
-                    aria-label="Sketch name"
-                    value={project?.name ?? ""}
-                    onChange={(e) =>
-                      update((p) => ({
-                        ...p,
-                        name: e.target.value.slice(0, 80),
-                      }))
-                    }
-                    onBlur={() => {
-                      if (!project?.name.trim())
-                        update((p) => ({ ...p, name: "Untitled sketch" }));
-                    }}
-                  />
-                  <div
-                    className="save-note"
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true"
-                  >
-                    <CheckIcon size={12} />
-                    {saved}
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button className="project-menu">
-                        Sketch options <CaretDownIcon size={12} />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent>
-                      <DropdownMenuItem onSelect={() => void openProjects()}>
-                        Open saved sketch
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => duplicate()}>
-                        Duplicate sketch
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onSelect={() => setModal("settings")}>
-                        Editor settings
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </SidebarGroup>
                 <SidebarGroup className="file-group">
                   <div className="section-label">
-                    FILES
+                    Files & assets
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -1651,7 +1742,7 @@ export default function Studio() {
                           isActive={f.name === active}
                           onClick={() => {
                             setActive(f.name);
-                            if (mobile) setView("code");
+                            if (mobile) changeView("code");
                           }}
                         >
                           <FileSymbol name={f.name} />
@@ -1733,7 +1824,7 @@ export default function Studio() {
               <ResizablePanelGroup orientation="horizontal">
                 <ResizablePanel
                   className="code-resizable"
-                  defaultSize="46%"
+                  defaultSize="42%"
                   minSize="25%"
                 >
                   {panelCode}
@@ -1741,7 +1832,7 @@ export default function Studio() {
                 <ResizableHandle className="panel-divider" />
                 <ResizablePanel
                   className="preview-resizable"
-                  defaultSize="54%"
+                  defaultSize="58%"
                   minSize="30%"
                 >
                   {panelCanvas}
@@ -1768,7 +1859,7 @@ export default function Studio() {
             <button
               className="view-button"
               onClick={() =>
-                setView(
+                changeView(
                   view === "canvas" ? (mobile ? "code" : "split") : "canvas",
                 )
               }
@@ -1948,6 +2039,25 @@ export default function Studio() {
                     aria-label="Dark mode"
                     checked={dark}
                     onCheckedChange={setDark}
+                  />
+                </label>
+                <label>
+                  <span>
+                    Reduce motion
+                    <small>Keep interface changes still and immediate.</small>
+                  </span>
+                  <Switch
+                    aria-label="Reduce interface motion"
+                    checked={reduceMotion}
+                    onCheckedChange={(value) => {
+                      setReduceMotion(value);
+                      try {
+                        localStorage.setItem(
+                          "velogra-reduce-motion",
+                          String(value),
+                        );
+                      } catch {}
+                    }}
                   />
                 </label>
                 <label>
