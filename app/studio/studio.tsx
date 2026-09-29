@@ -102,6 +102,7 @@ import {
 import { Toaster, toast } from "sonner";
 import { strToU8, zipSync, unzipSync, strFromU8 } from "fflate";
 import { CodeEditor } from "./editor";
+import { VelograMark } from "./brand";
 import {
   templates,
   makeProject,
@@ -632,7 +633,7 @@ export default function Studio() {
       ),
     );
     files["README.txt"] = strToU8(
-      `${project.name}\nCreated with Canvas.\n\nOpen index.html in a browser. For loading local data or media,\nserve this folder with a local HTTP server.\np5.js libraries require an internet connection.\n`,
+      `${project.name}\nCreated with Velogra. Code becomes form.\n\nOpen index.html in a browser. For loading local data or media,\nserve this folder with a local HTTP server.\np5.js libraries require an internet connection.\n`,
     );
     download(
       new Blob([zipSync(files) as Uint8Array<ArrayBuffer>], {
@@ -1439,9 +1440,9 @@ export default function Studio() {
       >
         <header className="topbar">
           <div className="brand">
-            <span className="brand-mark">c.</span>
-            <strong>canvas</strong>
-            <span className="brand-meta">p5.js studio</span>
+            <VelograMark className="brand-mark" />
+            <strong>velogra</strong>
+            <span className="brand-meta">creative coding studio</span>
           </div>
           <nav className="main-nav">
             <button className="nav-button" onClick={() => setModal("gallery")}>
@@ -1697,22 +1698,24 @@ export default function Studio() {
                 </a>
               </SidebarFooter>
             </Sidebar>
-            <div className="main-panels">
-              {view === "split" ? (
-                <ResizablePanelGroup orientation="horizontal">
-                  <ResizablePanel defaultSize="46%" minSize="25%">
-                    {panelCode}
-                  </ResizablePanel>
-                  <ResizableHandle className="panel-divider" />
-                  <ResizablePanel defaultSize="54%" minSize="30%">
-                    {panelCanvas}
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              ) : view === "code" ? (
-                panelCode
-              ) : (
-                panelCanvas
-              )}
+            <div className={`main-panels layout-${view}`}>
+              <ResizablePanelGroup orientation="horizontal">
+                <ResizablePanel
+                  className="code-resizable"
+                  defaultSize="46%"
+                  minSize="25%"
+                >
+                  {panelCode}
+                </ResizablePanel>
+                <ResizableHandle className="panel-divider" />
+                <ResizablePanel
+                  className="preview-resizable"
+                  defaultSize="54%"
+                  minSize="30%"
+                >
+                  {panelCanvas}
+                </ResizablePanel>
+              </ResizablePanelGroup>
             </div>
           </SidebarProvider>
         </div>

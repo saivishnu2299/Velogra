@@ -175,11 +175,10 @@ kbd {
   font-weight: 550;
 }
 .brand-mark {
-  font-family: Georgia, serif;
-  font-size: 29px;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
   color: var(--primary);
-  line-height: 1;
-  margin-top: -4px;
 }
 .brand-meta {
   font-size: 12px;
@@ -455,6 +454,16 @@ kbd {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+.layout-canvas [data-slot="resizable-panel"]:has(.code-resizable),
+.layout-code [data-slot="resizable-panel"]:has(.preview-resizable),
+.layout-canvas .panel-divider,
+.layout-code .panel-divider {
+  display: none !important;
+}
+.layout-canvas [data-slot="resizable-panel"]:has(.preview-resizable),
+.layout-code [data-slot="resizable-panel"]:has(.code-resizable) {
+  flex: 1 1 100% !important;
 }
 .code-panel {
   background: var(--surface);
@@ -1329,7 +1338,8 @@ kbd {
     font-size: 21px;
   }
   .brand-mark {
-    font-size: 27px;
+    width: 29px;
+    height: 29px;
   }
   .main-nav {
     margin-left: auto;

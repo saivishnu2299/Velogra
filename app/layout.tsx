@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Canvas · p5.js Studio",
+  title: "Velogra · Creative Coding Studio",
   description:
-    "An open canvas for creative ideas. Explore, edit, and create with p5.js.",
+    "Code becomes form. An open creative coding studio for art, motion, sound, and your next idea. Powered by p5.js.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
