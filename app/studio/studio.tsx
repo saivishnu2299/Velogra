@@ -1456,6 +1456,32 @@ export default function Studio() {
             </button>
           </nav>
           <div className="top-actions">
+            <div className="mobile-studio-menu">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="icon-button" aria-label="Studio menu">
+                    <DotsThreeIcon size={22} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => setModal("gallery")}>
+                    Explore templates
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void openProjects()}>
+                    Open saved sketch
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setModal("reference")}>
+                    Reference & first steps
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setModal("settings")}>
+                    Editor settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setModal("commands")}>
+                    All commands
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <IconButton
               label="Open command menu · ⌘K"
               onClick={() => setModal("commands")}
@@ -1472,7 +1498,7 @@ export default function Studio() {
             <div className="toolbar-divider" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="export-button">
+                <button className="export-button" aria-label="Export sketch">
                   <DownloadSimpleIcon size={16} />
                   <span>Export</span>
                   <CaretDownIcon size={11} />
@@ -1559,7 +1585,12 @@ export default function Studio() {
                         update((p) => ({ ...p, name: "Untitled sketch" }));
                     }}
                   />
-                  <div className="save-note">
+                  <div
+                    className="save-note"
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true"
+                  >
                     <CheckIcon size={12} />
                     {saved}
                   </div>
@@ -1822,11 +1853,13 @@ export default function Studio() {
                   >
                     <TemplatePreview template={t} />
                     <div className="template-copy">
-                      <span className="template-category">{t.category}</span>
                       <h3>{t.name}</h3>
                       <p>{t.description}</p>
                       <span className="template-use">
-                        Make it yours <PlusIcon size={15} />
+                        <span className="template-category">{t.category}</span>
+                        <span>
+                          Make it yours <PlusIcon size={15} />
+                        </span>
                       </span>
                     </div>
                   </button>
@@ -1974,6 +2007,8 @@ export default function Studio() {
                 <label htmlFor="filename">File name</label>
                 <input
                   id="filename"
+                  aria-invalid={Boolean(fileError)}
+                  aria-describedby={fileError ? "filename-error" : undefined}
                   autoFocus
                   value={fileName}
                   placeholder="helpers.js"
@@ -1983,7 +2018,7 @@ export default function Studio() {
                   }}
                 />
                 {fileError && (
-                  <p className="form-error" role="alert">
+                  <p id="filename-error" className="form-error" role="alert">
                     {fileError}
                   </p>
                 )}
@@ -2134,7 +2169,7 @@ function TemplatePreview({ template }: { template: Template }) {
                         "line(160 + frameCount * 6, 320 + sin(frameCount * 0.25) * 80, 166 + frameCount * 6, 320 + sin((frameCount + 1) * 0.25) * 80)",
                       )
                   : f.content) +
-              '\nsetTimeout(() => { if(typeof noLoop === "function") noLoop(); }, 400);',
+              "\nconst previewDraw = draw; draw = function() { previewDraw(); if (frameCount >= 32) noLoop(); };",
           }
         : f,
     );
@@ -2151,7 +2186,12 @@ function TemplatePreview({ template }: { template: Template }) {
   return (
     <div
       className="template-preview"
-      style={{ borderBottomColor: template.color }}
+      style={{
+        borderBottomColor: template.color,
+        background: ["blank", "brush"].includes(template.id)
+          ? "#ebedf5"
+          : "#12151a",
+      }}
     >
       {src && (
         <iframe
