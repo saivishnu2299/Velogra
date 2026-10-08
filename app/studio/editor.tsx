@@ -38,6 +38,7 @@ export function CodeEditor({
   onCursor,
   onRun,
   fontSize = 14,
+  lineWrap = true,
 }: {
   fileKey: string;
   name: string;
@@ -47,6 +48,7 @@ export function CodeEditor({
   onCursor: (l: number, c: number) => void;
   onRun: () => void;
   fontSize?: number;
+  lineWrap?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null),
     view = useRef<EditorView | null>(null),
@@ -56,7 +58,8 @@ export function CodeEditor({
     callbacks.current = { onChange, onCursor, onRun };
   }, [onChange, onCursor, onRun]);
   const theme = useRef(new Compartment()),
-    size = useRef(new Compartment());
+    size = useRef(new Compartment()),
+    wrapping = useRef(new Compartment());
   useEffect(() => {
     if (!host.current) return;
     const language = name.endsWith(".html")
@@ -94,7 +97,7 @@ export function CodeEditor({
                 : {},
             ),
             EditorState.tabSize.of(2),
-            EditorView.lineWrapping,
+            wrapping.current.of(lineWrap ? EditorView.lineWrapping : []),
             keymap.of([
               indentWithTab,
               {
@@ -147,6 +150,13 @@ export function CodeEditor({
       ],
     });
   }, [dark, fontSize]);
+  useEffect(() => {
+    view.current?.dispatch({
+      effects: wrapping.current.reconfigure(
+        lineWrap ? EditorView.lineWrapping : [],
+      ),
+    });
+  }, [lineWrap]);
   return (
     <div
       className="editor-host"

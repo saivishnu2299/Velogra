@@ -36,8 +36,8 @@ import {
   ImageIcon,
   TrashIcon,
   TerminalIcon,
-  PaletteIcon,
   KeyboardIcon,
+  ArrowCounterClockwiseIcon,
 } from "@phosphor-icons/react";
 import {
   Dialog,
@@ -120,6 +120,7 @@ import {
   validName,
   download,
   cloneProject,
+  DEFAULT_PARAMS,
   type Project,
   type SketchFile,
 } from "./projects";
@@ -404,9 +405,7 @@ export default function Studio() {
     const mq = window.matchMedia("(max-width: 820px)");
     const size = () => {
       setMobile(mq.matches);
-      setView((v) =>
-        mq.matches ? (v === "split" ? "code" : v) : v === "code" ? "split" : v,
-      );
+      setView((v) => (mq.matches && v === "split" ? "code" : v));
     };
     queueMicrotask(size);
     mq.addEventListener("change", size);
@@ -1160,16 +1159,19 @@ export default function Studio() {
   const file = project?.files.find((f) => f.name === active),
     currentTemplate = templates.find((t) => t.id === project?.template),
     errors = logs.filter((l) => l.kind === "error").length,
-    dirty = project && lastRun !== JSON.stringify(project.files);
+    dirty = project && lastRun !== JSON.stringify(project.files),
+    previewStale = dirty && runState !== "loading" && runState !== "error",
+    controlsChanged =
+      project?.params.hue !== DEFAULT_PARAMS.hue ||
+      project?.params.density !== DEFAULT_PARAMS.density ||
+      project?.params.speed !== DEFAULT_PARAMS.speed;
   const panelCode = (
     <section className="code-panel">
       <div className="panel-bar">
         <div className="file-tab">
           <FileSymbol name={active} />
           <span>{active}</span>
-          {dirty && (
-            <span className="unsynced" title="Changes waiting to run" />
-          )}
+          {dirty && <span className="unsynced">Edited</span>}
         </div>
         <div className="mobile-file-picker">
           <Select value={active} onValueChange={setActive}>
@@ -1259,6 +1261,7 @@ export default function Studio() {
           onCursor={(l, c) => setCursor([l, c])}
           onRun={run}
           fontSize={fontSize}
+          lineWrap={!mobile}
         />
       ) : (
         <div className="asset-view">
@@ -1269,7 +1272,7 @@ export default function Studio() {
       <div className="editor-bottom">
         <span>{file?.content.split("\n").length ?? 0} lines</span>
         <button onClick={() => setModal("reference")}>
-          <BookOpenIcon size={14} /> A little help
+          <BookOpenIcon size={14} /> Code help
         </button>
       </div>
     </section>
@@ -1279,14 +1282,20 @@ export default function Studio() {
       <div className="panel-bar">
         <div className="canvas-title">
           <FrameCornersIcon size={18} />
-          <span>Your canvas</span>
-          <span className={`run-label ${runState}`}>
+          <span>Canvas</span>
+          <span
+            className={`run-label ${previewStale ? "stale" : runState}`}
+            role="status"
+            aria-live="polite"
+          >
             <i />
-            {runState === "loading"
-              ? "Starting"
-              : runState === "error"
-                ? "Check messages"
-                : runState.charAt(0).toUpperCase() + runState.slice(1)}
+            {previewStale
+              ? "Preview out of date"
+              : runState === "loading"
+                ? "Starting"
+                : runState === "error"
+                  ? "Check messages"
+                  : runState.charAt(0).toUpperCase() + runState.slice(1)}
           </span>
         </div>
         <div className="panel-tools">
@@ -1376,7 +1385,7 @@ export default function Studio() {
             aria-expanded={controls}
           >
             <span>
-              <SlidersHorizontalIcon size={17} /> Make it yours
+              <SlidersHorizontalIcon size={17} /> Controls
             </span>
             <span>
               <CaretDownIcon className="controls-chevron" size={14} />
@@ -1393,13 +1402,17 @@ export default function Studio() {
               >
                 <div className="control">
                   <label>
-                    Color{" "}
-                    <span
-                      style={{
-                        background: `hsl(${project?.params.hue} 35% 65%)`,
-                      }}
-                      className="color-dot"
-                    />
+                    Color
+                    <span className="control-value">
+                      <i
+                        style={{
+                          background: `hsl(${project?.params.hue} 35% 65%)`,
+                        }}
+                        className="color-dot"
+                        aria-hidden="true"
+                      />
+                      {project?.params.hue}°
+                    </span>
                   </label>
                   <LabeledSlider
                     aria-label="Color hue"
@@ -1420,7 +1433,9 @@ export default function Studio() {
                     <span>{project?.params.density}</span>
                   </label>
                   <LabeledSlider
-                    aria-label="Detail"
+                    aria-label={
+                      project?.template === "brush" ? "Brush size" : "Detail"
+                    }
                     min={12}
                     max={120}
                     step={1}
@@ -1450,8 +1465,18 @@ export default function Studio() {
                 )}
               </div>
               <p className="canvas-tip">{currentTemplate.tip}</p>
+              {controlsChanged && (
+                <button
+                  className="reset-controls"
+                  onClick={() =>
+                    update((p) => ({ ...p, params: { ...DEFAULT_PARAMS } }))
+                  }
+                >
+                  <ArrowCounterClockwiseIcon size={14} /> Reset controls
+                </button>
+              )}
               <button className="next-idea" onClick={() => setModal("gallery")}>
-                Try another idea <CaretRightIcon size={14} />
+                Explore templates <CaretRightIcon size={14} />
               </button>
             </div>
           </div>
@@ -1459,7 +1484,7 @@ export default function Studio() {
       )}
       {ready && (!currentTemplate || !supportsControls) && (
         <div className="canvas-companion">
-          <h3>Follow your idea.</h3>
+          <h3>Make it yours</h3>
           <p>
             Open the code to add your own shapes, images, motion, and sound.
           </p>
@@ -1470,7 +1495,7 @@ export default function Studio() {
             Open code <CodeIcon size={16} />
           </button>
           <button className="next-idea" onClick={() => setModal("gallery")}>
-            Find a starting point <CaretRightIcon size={14} />
+            Explore templates <CaretRightIcon size={14} />
           </button>
         </div>
       )}
@@ -1621,10 +1646,11 @@ export default function Studio() {
             <button
               className="run primary-button"
               onClick={run}
-              disabled={!ready}
+              disabled={!ready || runState === "loading"}
+              aria-label={dirty ? "Update preview" : "Run sketch"}
             >
               <PlayIcon size={14} weight="fill" />
-              <span>Run</span>
+              <span>{dirty ? "Update" : "Run"}</span>
               <kbd>⌘ ↵</kbd>
             </button>
             <IconButton
@@ -1675,24 +1701,25 @@ export default function Studio() {
                 }}
               />
               <div
-                className="workspace-saved"
+                className={`workspace-saved ${saved === "Save failed" || saved === "Storage unavailable" ? "save-error" : ""}`}
                 role="status"
                 aria-live="polite"
                 aria-atomic="true"
               >
-                <CheckIcon size={11} />
-                {saved}
+                {saved === "Saved on this device" && <CheckIcon size={11} />}
+                {mobile && saved === "Saved on this device"
+                  ? "Saved locally"
+                  : saved}
               </div>
             </div>
           </div>
           <Tabs
-            value={view === "canvas" ? "canvas" : "code"}
-            onValueChange={(v) =>
-              changeView(v === "canvas" ? "canvas" : mobile ? "code" : "split")
-            }
+            value={view}
+            onValueChange={(v) => changeView(v as "canvas" | "split" | "code")}
           >
             <TabsList aria-label="Workspace view">
               <TabsTrigger value="canvas">Canvas</TabsTrigger>
+              {!mobile && <TabsTrigger value="split">Split</TabsTrigger>}
               <TabsTrigger value="code">Code</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -1794,17 +1821,6 @@ export default function Studio() {
               </SidebarContent>
               <SidebarFooter className="rail-footer">
                 <button
-                  className="explore-tile"
-                  onClick={() => setModal("gallery")}
-                >
-                  <PaletteIcon size={22} weight="light" />
-                  <span>
-                    A starting point
-                    <small>Find a sketch to make your own.</small>
-                  </span>
-                  <CaretRightIcon size={13} />
-                </button>
-                <button
                   className="subtle-button"
                   onClick={() => setModal("settings")}
                 >
@@ -1824,16 +1840,16 @@ export default function Studio() {
               <ResizablePanelGroup orientation="horizontal">
                 <ResizablePanel
                   className="code-resizable"
-                  defaultSize="42%"
-                  minSize="25%"
+                  defaultSize="54%"
+                  minSize="32%"
                 >
                   {panelCode}
                 </ResizablePanel>
                 <ResizableHandle className="panel-divider" />
                 <ResizablePanel
                   className="preview-resizable"
-                  defaultSize="58%"
-                  minSize="30%"
+                  defaultSize="46%"
+                  minSize="28%"
                 >
                   {panelCanvas}
                 </ResizablePanel>
@@ -1865,7 +1881,11 @@ export default function Studio() {
               }
             >
               <CodeIcon size={14} />
-              {view === "canvas" ? "Show code" : "Canvas focus"}
+              {view === "canvas"
+                ? mobile
+                  ? "Show code"
+                  : "Show split view"
+                : "Focus canvas"}
             </button>
             <IconButton
               label="Keyboard shortcuts and getting started"
@@ -1898,7 +1918,7 @@ export default function Studio() {
                 {
                   (
                     {
-                      gallery: "Start with a spark.",
+                      gallery: "Start a sketch",
                       projects: "Your sketches",
                       reference: "A little help goes a long way.",
                       settings: "Your studio, your way.",
@@ -1915,7 +1935,7 @@ export default function Studio() {
                   (
                     {
                       gallery:
-                        "Pick an idea, change a few things, and see where it takes you.",
+                        "Choose a template. Your current sketch stays saved on this device.",
                       projects:
                         "Your sketches are saved in this browser, on this device.",
                       reference:
@@ -1949,7 +1969,7 @@ export default function Studio() {
                       <span className="template-use">
                         <span className="template-category">{t.category}</span>
                         <span>
-                          Make it yours <PlusIcon size={15} />
+                          Use template <PlusIcon size={15} />
                         </span>
                       </span>
                     </div>
