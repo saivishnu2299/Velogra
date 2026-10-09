@@ -14,6 +14,16 @@ export type Project = {
   updated: number;
 };
 export const DEFAULT_PARAMS = { hue: 165, density: 72, speed: 35 };
+let operations: Promise<unknown> = Promise.resolve();
+const deletedProjects = new Set<string>();
+
+// Include reads in the queue so the library sees the final save on studio exit.
+function enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  const result = operations.then(operation);
+  operations = result.catch(() => {});
+  return result;
+}
+
 export function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open("canvas-studio", 1);
@@ -21,34 +31,75 @@ export function database(): Promise<IDBDatabase> {
       request.result.createObjectStore("projects", { keyPath: "id" });
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    request.onblocked = () =>
+      reject(new Error("Close other Velogra tabs and try again."));
   });
 }
-export async function readProjects(): Promise<Project[]> {
+
+async function transaction<T>(
+  mode: IDBTransactionMode,
+  request: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
   const db = await database();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction("projects", "readonly");
-    const request = tx.objectStore("projects").getAll();
-    request.onsuccess = () =>
-      resolve(
-        (request.result as Project[]).sort((a, b) => b.updated - a.updated),
-      );
-    request.onerror = () => reject(request.error);
-    tx.oncomplete = () => db.close();
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      const tx = db.transaction("projects", mode);
+      const operation = request(tx.objectStore("projects"));
+      tx.oncomplete = () => resolve(operation.result);
+      tx.onabort = () =>
+        reject(
+          tx.error ?? operation.error ?? new Error("Storage operation failed."),
+        );
+      tx.onerror = () =>
+        reject(
+          tx.error ?? operation.error ?? new Error("Storage operation failed."),
+        );
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export function readProjects(): Promise<Project[]> {
+  return enqueue(async () => {
+    const projects = await transaction<Project[]>("readonly", (store) =>
+      store.getAll(),
+    );
+    return projects.sort((a, b) => b.updated - a.updated);
   });
 }
-export async function saveProject(project: Project) {
-  const db = await database();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction("projects", "readwrite");
-    tx.objectStore("projects").put(project);
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(tx.error);
-    };
+
+export function readProject(id: string): Promise<Project | undefined> {
+  return enqueue(() =>
+    transaction<Project | undefined>("readonly", (store) => store.get(id)),
+  );
+}
+
+export function saveProject(project: Project): Promise<void> {
+  if (deletedProjects.has(project.id)) {
+    return Promise.reject(new Error("This project has been deleted."));
+  }
+  const snapshot = structuredClone(project);
+  return enqueue(async () => {
+    await transaction("readwrite", (store) => store.put(snapshot));
+  });
+}
+
+export function deleteProject(id: string): Promise<void> {
+  // Reject any late autosave immediately; previously queued saves finish first.
+  deletedProjects.add(id);
+  return enqueue(async () => {
+    try {
+      await transaction("readwrite", (store) => store.delete(id));
+    } catch (error) {
+      deletedProjects.delete(id);
+      throw error;
+    }
+    try {
+      if (localStorage.getItem("canvas-active") === id) {
+        localStorage.removeItem("canvas-active");
+      }
+    } catch {}
   });
 }
 export function validName(name: string) {
@@ -73,7 +124,9 @@ export function cloneProject(project: Project): Project {
   return {
     ...project,
     id: crypto.randomUUID(),
-    name: project.name + " copy",
+    name: project.name.slice(0, 75) + " copy",
+    files: project.files.map((file) => ({ ...file })),
+    params: { ...project.params },
     updated: Date.now(),
   };
 }

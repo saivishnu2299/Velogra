@@ -1,6 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
+import { registerProjectNavigationGuard } from "./navigation-guard";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -101,21 +104,23 @@ import {
   CommandGroup,
 } from "@/components/ui/command";
 import { Toaster, toast } from "sonner";
-import { strToU8, zipSync, unzipSync, strFromU8 } from "fflate";
+import {
+  exportProjectZIP,
+  importProjectZIP,
+  toSketchFile,
+} from "./project-archive";
 import { CodeEditor } from "./editor";
 import { VelograMark } from "./brand";
 import {
   templates,
   makeProject,
-  html,
-  css,
   P5_LATEST,
   P5_LEGACY,
   type Template,
 } from "./templates";
 import { compileProject, prepareRuntime } from "./runtime";
 import {
-  readProjects,
+  readProject,
   saveProject,
   validName,
   download,
@@ -127,7 +132,6 @@ import {
 
 type Modal =
   | "gallery"
-  | "projects"
   | "reference"
   | "settings"
   | "addfile"
@@ -274,14 +278,23 @@ function HelpRows({ category }: { category: string }) {
   );
 }
 
-export default function Studio() {
+export default function Studio({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const [loadError, setLoadError] = useState<"missing" | "storage" | null>(
+    null,
+  );
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const navigating = useRef(false);
+  const mounted = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const committedProject = useRef<Project | null>(null);
   const [project, setProject] = useState<Project | null>(null),
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("Saving…");
   const [dark, setDark] = useState(false),
     [active, setActive] = useState("sketch.js"),
-    [modal, setModal] = useState<Modal>(null),
-    [savedProjects, setSavedProjects] = useState<Project[]>([]);
+    [modal, setModal] = useState<Modal>(null);
   const [view, setView] = useState<"split" | "canvas" | "code">("canvas"),
     [mobile, setMobile] = useState(false),
     [autoRun, setAutoRun] = useState(false),
@@ -350,11 +363,40 @@ export default function Studio() {
     return () => document.documentElement.classList.remove("reduce-motion");
   }, [reduceMotion]);
   const [lastRun, setLastRun] = useState("");
-  useEffect(() => {
+  useLayoutEffect(() => {
     projectRef.current = project;
   }, [project]);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      token.current = "";
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      // Browser Back also flushes the latest edit before the library reads.
+      if (projectRef.current && !navigating.current)
+        void saveProject(projectRef.current).catch(() => {});
+    };
+  }, []);
+  const persistProject = useCallback(async (snapshot: Project) => {
+    try {
+      await saveProject(snapshot);
+      if (mounted.current && projectRef.current?.id === snapshot.id)
+        committedProject.current = snapshot;
+      if (mounted.current && projectRef.current === snapshot) {
+        setSaved("Saved on this device");
+        try {
+          localStorage.setItem("canvas-active", snapshot.id);
+        } catch {}
+      }
+    } catch (error) {
+      if (mounted.current && projectRef.current === snapshot)
+        setSaved("Save failed");
+      throw error;
+    }
+  }, []);
 
   const update = useCallback((fn: (p: Project) => Project) => {
+    if (navigating.current) return;
     setSaved("Saving…");
     setProject((p) => (p ? { ...fn(p), updated: Date.now() } : p));
   }, []);
@@ -380,6 +422,7 @@ export default function Studio() {
       if (token.current !== runToken) return;
       setSource(compileProject(p, runToken));
     } catch (e) {
+      if (!mounted.current) return;
       setRunState("error");
       toast.error((e as Error).message);
     }
@@ -418,33 +461,31 @@ export default function Studio() {
         );
       } catch {}
     });
-    readProjects()
-      .then((items) => {
+    readProject(projectId)
+      .then((item) => {
         if (!alive) return;
-        let current: string | null = null;
-        try {
-          current = localStorage.getItem("canvas-active");
-        } catch {}
-        setProject(
-          items.find((p) => p.id === current) ?? items[0] ?? makeProject(),
+        if (!item) {
+          setLoadError("missing");
+          return;
+        }
+        setProject(item);
+        committedProject.current = item;
+        setActive(
+          item.files.some((file) => file.name === "sketch.js")
+            ? "sketch.js"
+            : (item.files[0]?.name ?? "index.html"),
         );
+        setControls(item.template !== "custom");
         setReady(true);
       })
       .catch(() => {
-        if (alive) {
-          setProject(makeProject());
-          setReady(true);
-          setSaved("Storage unavailable");
-          toast.error(
-            "Device storage is unavailable. Export your work to keep it.",
-          );
-        }
+        if (alive) setLoadError("storage");
       });
     return () => {
       alive = false;
       mq.removeEventListener("change", size);
     };
-  }, []);
+  }, [projectId, loadAttempt]);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     if (ready)
@@ -459,34 +500,47 @@ export default function Studio() {
       } catch {}
   }, [autoRun, ready]);
   useEffect(() => {
-    if (!project || !ready) return;
+    if (!project || !ready || navigating.current) return;
     const timer = setTimeout(() => {
-      saveProject(project)
-        .then(() => {
-          setSaved("Saved on this device");
-          try {
-            localStorage.setItem("canvas-active", project.id);
-          } catch {}
-        })
-        .catch(() => {
-          setSaved("Save failed");
+      void persistProject(project).catch(() => {
+        if (mounted.current && projectRef.current === project)
           toast.error("Could not save on this device. Export a backup.");
-        });
+      });
     }, 450);
-    return () => clearTimeout(timer);
-  }, [project, ready]);
+    saveTimer.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (saveTimer.current === timer) saveTimer.current = null;
+    };
+  }, [project, ready, persistProject]);
   useEffect(() => {
     const persist = () => {
-      if (document.visibilityState === "hidden" && projectRef.current)
-        void saveProject(projectRef.current).catch(() => {});
+      if (
+        document.visibilityState === "hidden" &&
+        projectRef.current &&
+        !navigating.current
+      )
+        void persistProject(projectRef.current).catch(() => {});
     };
     document.addEventListener("visibilitychange", persist);
     return () => document.removeEventListener("visibilitychange", persist);
-  }, []);
-  const projectId = project?.id;
+  }, [persistProject]);
   useEffect(() => {
-    if (ready && projectId) void run();
-  }, [ready, projectId, run]);
+    const protectUnsaved = (event: BeforeUnloadEvent) => {
+      const current = projectRef.current;
+      if (!current || current === committedProject.current) return;
+      // Cross-document Back/reload cannot wait for IndexedDB, unlike app navigation.
+      void persistProject(current).catch(() => {});
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsaved);
+    return () => window.removeEventListener("beforeunload", protectUnsaved);
+  }, [persistProject]);
+  const loadedProjectId = project?.id;
+  useEffect(() => {
+    if (ready && loadedProjectId) void run();
+  }, [ready, loadedProjectId, run]);
   useEffect(() => {
     if (
       !autoRun ||
@@ -566,37 +620,89 @@ export default function Studio() {
     return () => clearTimeout(timer);
   }, [runState]);
 
-  const switchProject = async (next: Project) => {
-    const current = projectRef.current;
-    if (current)
-      try {
-        await saveProject(current);
-      } catch {
-        toast.error("Could not save the current sketch. Export it first.");
-        return;
+  const navigate = async (next: Project | null): Promise<boolean> => {
+    if (navigating.current) return false;
+    navigating.current = true;
+    setLeaving(true);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    try {
+      const current = projectRef.current;
+      if (current) await persistProject(current);
+      if (next) await saveProject(next);
+      if (!mounted.current) return false;
+      router.push(next ? `/studio/${encodeURIComponent(next.id)}` : "/");
+      return true;
+    } catch {
+      navigating.current = false;
+      if (mounted.current) {
+        setLeaving(false);
+        toast.error(
+          "Could not save this project. Your studio remains open; export a backup or try again.",
+        );
       }
-    setSaved("Saving…");
-    setProject(next);
-    setActive(
-      next.files.some((f) => f.name === "sketch.js")
-        ? "sketch.js"
-        : (next.files[0]?.name ?? "index.html"),
-    );
-    setModal(null);
-    setControls(next.template !== "custom");
+      return false;
+    }
   };
+  const switchProject = (next: Project) => navigate(next);
   const newSketch = (template: Template) => {
     void switchProject(makeProject(template));
   };
-  const openProjects = async () => {
-    try {
-      if (project) await saveProject(project);
-      setSavedProjects(await readProjects());
-      setModal("projects");
-    } catch {
-      toast.error("Could not read saved sketches.");
-    }
-  };
+  const openProjects = () => navigate(null);
+  useEffect(() => {
+    // The route can mount before the router commits its URL to history.
+    const studioPath = `/studio/${encodeURIComponent(projectId)}`;
+    const studioURL = new URL(studioPath, window.location.origin).href;
+    let studioHistory = window.history.state;
+    const frame = requestAnimationFrame(() => {
+      if (window.location.pathname === studioPath)
+        studioHistory = window.history.state;
+    });
+    const back = (event: PopStateEvent) => {
+      const destination =
+        window.location.pathname +
+        window.location.search +
+        window.location.hash;
+      if (
+        !projectRef.current ||
+        window.location.href === studioURL ||
+        (window.location.pathname !== "/" &&
+          !window.location.pathname.startsWith("/studio/"))
+      )
+        return;
+      // Keep the editor mounted until its final save succeeds, including Back.
+      event.stopImmediatePropagation();
+      // Bypass the router's patched method: it must not render the destination
+      // until the save below commits, or discard the editor on a failed save.
+      History.prototype.replaceState.call(
+        window.history,
+        studioHistory,
+        "",
+        studioURL,
+      );
+      if (navigating.current) return;
+      navigating.current = true;
+      setLeaving(true);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      void persistProject(projectRef.current)
+        .then(() => {
+          if (mounted.current) router.replace(destination);
+        })
+        .catch(() => {
+          navigating.current = false;
+          if (mounted.current) {
+            setLeaving(false);
+            toast.error(
+              "Could not save this project. Your studio remains open; export a backup or try again.",
+            );
+          }
+        });
+    };
+    const unregister = registerProjectNavigationGuard(back);
+    return () => {
+      cancelAnimationFrame(frame);
+      unregister();
+    };
+  }, [persistProject, projectId, router]);
   const edit = (content: string) =>
     update((p) => ({
       ...p,
@@ -655,42 +761,12 @@ export default function Studio() {
   };
   const exportZIP = () => {
     if (!project) return;
-    const files: Record<string, Uint8Array> = {};
-    for (const f of project.files)
-      files[f.name] = f.binary
-        ? Uint8Array.from(atob(f.content.split(",")[1]), (c) => c.charCodeAt(0))
-        : strToU8(f.content);
-    if (files["index.html"])
-      files["index.html"] = strToU8(
-        project.files
-          .find((f) => f.name === "index.html")!
-          .content.replace(
-            /<head([^>]*)>/i,
-            `<head$1>\n<script>window.studio=${JSON.stringify(project.params)};</script>`,
-          ),
-      );
-    files["canvas-project.json"] = strToU8(
-      JSON.stringify(
-        {
-          name: project.name,
-          params: project.params,
-          template: project.template,
-          version: project.version,
-        },
-        null,
-        2,
-      ),
-    );
-    files["README.txt"] = strToU8(
-      `${project.name}\nCreated with Velogra. Code becomes form.\n\nOpen index.html in a browser. For loading local data or media,\nserve this folder with a local HTTP server.\np5.js libraries require an internet connection.\n`,
-    );
-    download(
-      new Blob([zipSync(files) as Uint8Array<ArrayBuffer>], {
-        type: "application/zip",
-      }),
-      `${project.name}.zip`,
-    );
-    toast.success("Project exported");
+    try {
+      exportProjectZIP(project);
+      toast.success("Project exported");
+    } catch {
+      toast.error("Could not export this project.");
+    }
   };
   const onImport = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -700,91 +776,9 @@ export default function Studio() {
         50 * 1024 * 1024
       )
         throw new Error("Choose files totaling less than 50 MB.");
-      if (files.length === 1 && files[0].name.endsWith(".zip")) {
-        let expanded = 0,
-          count = 0;
-        const archive = unzipSync(
-          new Uint8Array(await files[0].arrayBuffer()),
-          {
-            filter: (file) => {
-              if (file.name.endsWith("/") || file.name.includes("__MACOSX"))
-                return false;
-              expanded += file.originalSize;
-              count++;
-              if (expanded > 50 * 1024 * 1024 || count > 200)
-                throw new Error(
-                  "Use fewer than 200 files and 50 MB of uncompressed data.",
-                );
-              return true;
-            },
-          },
-        );
-        const entries = Object.entries(archive).filter(
-          ([name]) =>
-            !name.endsWith("/") &&
-            !name.includes("__MACOSX") &&
-            !name.split("/").some((p) => p.startsWith(".")),
-        );
-        if (
-          entries.length > 200 ||
-          entries.reduce((sum, [, data]) => sum + data.length, 0) >
-            50 * 1024 * 1024
-        )
-          throw new Error(
-            "This project is too large. Use fewer than 200 files and 50 MB.",
-          );
-        const root =
-          entries
-            .find(([name]) => name.endsWith("index.html"))?.[0]
-            .replace(/index\.html$/, "") ?? "";
-        const imported = entries.map(([name, data]) =>
-          toSketchFile(
-            name.startsWith(root) ? name.slice(root.length) : name,
-            data,
-          ),
-        );
-        if (imported.some((f) => !validName(f.name)))
-          throw new Error("The archive contains an unsupported file path.");
-        const next = makeProject(templates.find((t) => t.id === "blank")!);
-        next.name = files[0].name.replace(/\.zip$/, "");
-        next.template = "custom";
-        next.files = imported;
-        const metadata = imported.find((f) => f.name === "canvas-project.json");
-        if (metadata)
-          try {
-            const info = JSON.parse(metadata.content);
-            if (typeof info.name === "string")
-              next.name = info.name.slice(0, 80);
-            if (templates.some((t) => t.id === info.template))
-              next.template = info.template;
-            if ([P5_LATEST, P5_LEGACY].includes(info.version))
-              next.version = info.version;
-            if (
-              info.params &&
-              ["hue", "density", "speed"].every((key) =>
-                Number.isFinite(info.params[key]),
-              )
-            )
-              next.params = {
-                hue: Math.max(0, Math.min(360, info.params.hue)),
-                density: Math.max(12, Math.min(120, info.params.density)),
-                speed: Math.max(0, Math.min(100, info.params.speed)),
-              };
-          } catch {}
-        else {
-          const version = imported
-            .find((f) => f.name === "index.html")
-            ?.content.match(/p5@([\d.]+)\/lib\/p5/);
-          if (version && [P5_LATEST, P5_LEGACY].includes(version[1]))
-            next.version = version[1];
-        }
-        next.files = next.files.filter((f) => f.name !== "canvas-project.json");
-        if (!next.files.some((f) => f.name === "index.html"))
-          next.files.push({ name: "index.html", content: html() });
-        if (!next.files.some((f) => f.name === "style.css"))
-          next.files.push({ name: "style.css", content: css });
-        await switchProject(next);
-        toast.success("Project imported");
+      if (files.length === 1 && /\.zip$/i.test(files[0].name)) {
+        const next = await importProjectZIP(files[0]);
+        if (await switchProject(next)) toast.success("Project imported");
       } else {
         const imports: SketchFile[] = [];
         for (const f of Array.from(files)) {
@@ -812,35 +806,6 @@ export default function Studio() {
       if (upload.current) upload.current.value = "";
     }
   };
-  function toSketchFile(name: string, data: Uint8Array, mime = ""): SketchFile {
-    if (/\.(js|mjs|html|css|json|txt|csv|md|svg|vert|frag|glsl)$/i.test(name))
-      return { name, content: strFromU8(data), mime };
-    const types: Record<string, string> = {
-      png: "image/png",
-      jpg: "image/jpeg",
-      jpeg: "image/jpeg",
-      gif: "image/gif",
-      webp: "image/webp",
-      mp3: "audio/mpeg",
-      wav: "audio/wav",
-      ogg: "audio/ogg",
-      mp4: "video/mp4",
-      woff: "font/woff",
-      woff2: "font/woff2",
-      ttf: "font/ttf",
-    };
-    let binary = "";
-    for (let i = 0; i < data.length; i += 8192)
-      binary += String.fromCharCode(...data.subarray(i, i + 8192));
-    const type =
-      mime || types[name.split(".").pop() ?? ""] || "application/octet-stream";
-    return {
-      name,
-      content: `data:${type};base64,${btoa(binary)}`,
-      binary: true,
-      mime: type,
-    };
-  }
   const addFile = () => {
     const name = fileName.trim();
     if (!validName(name)) {
@@ -955,7 +920,7 @@ export default function Studio() {
   const actionNames = [
     "Run sketch",
     "Explore starter sketches",
-    "Open saved sketches",
+    "Open project library",
     "Format code",
     "Toggle light and dark mode",
     "Canvas focus",
@@ -973,7 +938,7 @@ export default function Studio() {
       case "Explore starter sketches":
         setModal("gallery");
         break;
-      case "Open saved sketches":
+      case "Open project library":
         void openProjects();
         break;
       case "Format code":
@@ -1002,6 +967,10 @@ export default function Studio() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.defaultPrevented || !(e.metaKey || e.ctrlKey)) return;
+      if (navigating.current) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         run();
@@ -1012,12 +981,15 @@ export default function Studio() {
         e.preventDefault();
         const p = projectRef.current;
         if (p)
-          saveProject(p)
+          persistProject(p)
             .then(() => {
-              setSaved("Saved on this device");
-              toast.success("Sketch saved");
+              if (mounted.current && projectRef.current === p)
+                toast.success("Sketch saved");
             })
-            .catch(() => toast.error("Could not save. Export a backup."));
+            .catch(() => {
+              if (mounted.current)
+                toast.error("Could not save. Export a backup.");
+            });
       } else if (e.shiftKey && e.key.toLowerCase() === "f") {
         e.preventDefault();
         void formatCode();
@@ -1025,7 +997,7 @@ export default function Studio() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [run, formatCode]);
+  }, [run, formatCode, persistProject]);
   useEffect(() => {
     type Context = {
       registerTool: (
@@ -1551,10 +1523,72 @@ export default function Studio() {
     </section>
   );
 
+  if (!project)
+    return (
+      <main className={`project-library ${dark ? "dark" : ""}`}>
+        <header className="topbar">
+          <Link className="brand" href="/">
+            <VelograMark className="brand-mark" />
+            <strong>velogra</strong>
+          </Link>
+        </header>
+        <section
+          className="library-empty project-unavailable"
+          role={loadError ? "alert" : "status"}
+        >
+          <FolderOpenIcon size={36} />
+          <h1>
+            {loadError === "missing"
+              ? "This project is unavailable."
+              : loadError === "storage"
+                ? "Your project couldn’t be opened."
+                : "Opening your project…"}
+          </h1>
+          {loadError && (
+            <p>
+              {loadError === "missing"
+                ? "It may have been deleted or saved in a different browser."
+                : "Device storage is unavailable. Your project has not been changed."}
+            </p>
+          )}
+          {loadError && (
+            <div className="library-actions">
+              <button
+                className="outline-button"
+                onClick={() => router.push("/")}
+              >
+                Back to projects
+              </button>
+              {loadError === "storage" && (
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    setLoadError(null);
+                    setLoadAttempt((attempt) => attempt + 1);
+                  }}
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+        <Toaster
+          position="bottom-right"
+          theme={dark ? "dark" : "light"}
+          richColors
+        />
+      </main>
+    );
+
   return (
     <TooltipProvider delayDuration={350}>
       <main
-        className={`studio view-${view} ${reduceMotion ? "reduce-motion" : ""} ${runState === "loading" ? "is-loading" : ""} ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
+        aria-busy={leaving}
+        onKeyDownCapture={(event) => {
+          if (leaving) event.preventDefault();
+        }}
+        className={`studio ${leaving ? "is-navigating" : ""} view-${view} ${reduceMotion ? "reduce-motion" : ""} ${runState === "loading" ? "is-loading" : ""} ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
       >
         <header className="topbar">
           <div className="brand">
@@ -1562,6 +1596,13 @@ export default function Studio() {
             <strong>velogra</strong>
             <span className="brand-meta">creative coding studio</span>
           </div>
+          <button
+            className="nav-button studio-projects-button"
+            onClick={() => void openProjects()}
+            disabled={leaving}
+          >
+            <FolderOpenIcon size={17} /> Projects
+          </button>
           <nav className="main-nav">
             <button className="nav-button" onClick={() => setModal("gallery")}>
               Explore
@@ -1586,7 +1627,7 @@ export default function Studio() {
                     Explore templates
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void openProjects()}>
-                    Open saved sketch
+                    Project library
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setModal("reference")}>
                     Reference & first steps
@@ -1676,7 +1717,7 @@ export default function Studio() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuItem onSelect={() => void openProjects()}>
-                  Open saved sketch
+                  Project library
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => duplicate()}>
                   Duplicate sketch
@@ -1919,7 +1960,6 @@ export default function Studio() {
                   (
                     {
                       gallery: "Start a sketch",
-                      projects: "Your sketches",
                       reference: "A little help goes a long way.",
                       settings: "Your studio, your way.",
                       addfile: "Add a file",
@@ -1936,8 +1976,6 @@ export default function Studio() {
                     {
                       gallery:
                         "Choose a template. Your current sketch stays saved on this device.",
-                      projects:
-                        "Your sketches are saved in this browser, on this device.",
                       reference:
                         "You don’t need to know everything. Start with one small change.",
                       settings: "Make room for the way you like to create.",
@@ -1975,30 +2013,6 @@ export default function Studio() {
                     </div>
                   </button>
                 ))}
-              </div>
-            )}
-            {modal === "projects" && (
-              <div className="saved-list">
-                {savedProjects.length === 0 ? (
-                  <p>
-                    No saved sketches yet. Start a sketch to make this space
-                    yours.
-                  </p>
-                ) : (
-                  savedProjects.map((p) => (
-                    <button key={p.id} onClick={() => void switchProject(p)}>
-                      <FolderOpenIcon size={22} />
-                      <span>
-                        <strong>{p.name}</strong>
-                        <small>
-                          {p.files.length} files ·{" "}
-                          {new Date(p.updated).toLocaleDateString()}
-                        </small>
-                      </span>
-                      {p.id === project?.id && <CheckIcon size={18} />}
-                    </button>
-                  ))
-                )}
               </div>
             )}
             {modal === "reference" && (
@@ -2046,6 +2060,7 @@ export default function Studio() {
                     <small>Update the canvas after you finish typing.</small>
                   </span>
                   <Switch
+                    appearance="studio"
                     aria-label="Auto-run sketches"
                     checked={autoRun}
                     onCheckedChange={setAutoRun}
@@ -2056,6 +2071,7 @@ export default function Studio() {
                     Dark mode<small>A quieter studio after dark.</small>
                   </span>
                   <Switch
+                    appearance="studio"
                     aria-label="Dark mode"
                     checked={dark}
                     onCheckedChange={setDark}
@@ -2067,6 +2083,7 @@ export default function Studio() {
                     <small>Keep interface changes still and immediate.</small>
                   </span>
                   <Switch
+                    appearance="studio"
                     aria-label="Reduce interface motion"
                     checked={reduceMotion}
                     onCheckedChange={(value) => {
