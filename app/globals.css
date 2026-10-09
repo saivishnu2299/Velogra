@@ -1,6 +1,20 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+}
 :root {
   --background: #f4f5f2;
   --foreground: #252e29;
@@ -40,21 +54,21 @@
 }
 .dark {
   color-scheme: dark;
-  --background: #161a18;
-  --foreground: #e3e9e4;
-  --surface: #1c211e;
-  --surface-2: #282f2b;
-  --border: #333d37;
-  --muted-foreground: #aab4ac;
+  --background: #151618;
+  --foreground: #eceef1;
+  --surface: #1c1d20;
+  --surface-2: #25272b;
+  --border: #34363b;
+  --muted-foreground: #a8acb4;
   --primary: #bbded2;
   --primary-foreground: #1b3730;
   --ring: #98c7b8;
-  --control-track: #6b7970;
+  --control-track: #717780;
   --warning: #dcc18a;
   --image-outline: rgb(255 255 255 / 12%);
   --elevation: 0 12px 40px rgb(0 0 0 / 30%), 0 2px 6px rgb(0 0 0 / 15%);
   --destructive: #f4879c;
-  --code-comment: #98a49c;
+  --code-comment: #999fa8;
   --code-keyword: #bfaddc;
   --code-string: #a4c6b1;
   --code-number: #ddb186;
@@ -89,7 +103,7 @@
   --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
-  --font-sans: "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Inter", Arial, sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 * {
@@ -103,7 +117,9 @@ body {
   color: var(--foreground);
 }
 body {
-  font-family: "Helvetica Neue", Arial, sans-serif;
+  font-family: "Inter", Arial, sans-serif;
+  font-optical-sizing: auto;
+  font-feature-settings: "liga" 1, "calt" 1;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -621,7 +637,7 @@ kbd {
 .cm-search {
   background: var(--surface-2);
   font:
-    13px "Helvetica Neue",
+    13px "Inter",
     Arial,
     sans-serif;
 }
