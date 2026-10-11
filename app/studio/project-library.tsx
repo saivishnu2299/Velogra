@@ -1,5 +1,7 @@
 "use client";
 
+import { AppearanceSelect, useAppearance } from "./appearance";
+
 import {
   useCallback,
   useEffect,
@@ -20,8 +22,6 @@ import {
   DownloadSimpleIcon,
   TrashIcon,
   ArrowUpRightIcon,
-  MoonIcon,
-  SunIcon,
   CheckIcon,
 } from "@phosphor-icons/react";
 import {
@@ -71,8 +71,7 @@ export default function ProjectLibrary() {
   );
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("recent");
-  const [dark, setDark] = useState(false);
-  const [themeReady, setThemeReady] = useState(false);
+  const { dark } = useAppearance();
   const opening = useRef(false);
   const returnFocus = useRef<HTMLElement | null>(null);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
@@ -101,29 +100,19 @@ export default function ProjectLibrary() {
     queueMicrotask(() => {
       if (alive.current) void load();
     });
-    queueMicrotask(() => {
-      if (!alive.current) return;
-      try {
-        setDark(localStorage.getItem("canvas-theme") === "dark");
-      } catch {}
-      setThemeReady(true);
-    });
     return () => {
       alive.current = false;
     };
   }, [load]);
 
   useEffect(() => {
-    if (!themeReady) return;
-    document.documentElement.classList.toggle("dark", dark);
     try {
-      localStorage.setItem("canvas-theme", dark ? "dark" : "light");
       document.documentElement.classList.toggle(
         "reduce-motion",
         localStorage.getItem("velogra-reduce-motion") === "true",
       );
     } catch {}
-  }, [dark, themeReady]);
+  }, []);
 
   const perform = async (operation: () => Promise<void>) => {
     if (pending.current) return;
@@ -243,13 +232,7 @@ export default function ProjectLibrary() {
           <span className="library-local">
             <CheckIcon size={14} /> On this device
           </span>
-          <button
-            className="icon-button"
-            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-            onClick={() => setDark(!dark)}
-          >
-            {dark ? <SunIcon size={19} /> : <MoonIcon size={19} />}
-          </button>
+          <AppearanceSelect />
         </div>
       </header>
       <section className="library-content" aria-labelledby="projects-heading">

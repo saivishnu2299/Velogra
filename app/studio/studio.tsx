@@ -1,5 +1,7 @@
 "use client";
 
+import { AppearanceSelect, useAppearance } from "./appearance";
+
 import Image from "next/image";
 import Link from "next/link";
 import { registerProjectNavigationGuard } from "./navigation-guard";
@@ -17,8 +19,6 @@ import {
   PauseIcon,
   StopIcon,
   PlusIcon,
-  SunIcon,
-  MoonIcon,
   CodeIcon,
   FrameCornersIcon,
   DownloadSimpleIcon,
@@ -296,8 +296,8 @@ export default function Studio({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(null),
     [ready, setReady] = useState(false),
     [saved, setSaved] = useState("Saving…");
-  const [dark, setDark] = useState(false),
-    [active, setActive] = useState("sketch.js"),
+  const { dark, setDark } = useAppearance();
+  const [active, setActive] = useState("sketch.js"),
     [modal, setModalState] = useState<Modal>(null);
   const modalTrigger = useRef<HTMLElement | null>(null);
   const setModal = useCallback((next: Modal) => {
@@ -466,7 +466,6 @@ export default function Studio({ projectId }: { projectId: string }) {
     mq.addEventListener("change", size);
     queueMicrotask(() => {
       try {
-        setDark(localStorage.getItem("canvas-theme") === "dark");
         setAutoRun(localStorage.getItem("canvas-autorun") === "true");
         setReduceMotion(
           localStorage.getItem("velogra-reduce-motion") === "true",
@@ -498,13 +497,6 @@ export default function Studio({ projectId }: { projectId: string }) {
       mq.removeEventListener("change", size);
     };
   }, [projectId, loadAttempt]);
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    if (ready)
-      try {
-        localStorage.setItem("canvas-theme", dark ? "dark" : "light");
-      } catch {}
-  }, [dark, ready]);
   useEffect(() => {
     if (ready)
       try {
@@ -1700,18 +1692,7 @@ export default function Studio({ projectId }: { projectId: string }) {
             >
               <CommandIcon size={18} />
             </IconButton>
-            <IconButton
-              label={dark ? "Switch to light mode" : "Switch to dark mode"}
-              onClick={() => setDark(!dark)}
-            >
-              <span
-                className={`theme-icons ${dark ? "is-dark" : ""}`}
-                aria-hidden="true"
-              >
-                <MoonIcon className="theme-moon" size={19} />
-                <SunIcon className="theme-sun" size={19} />
-              </span>
-            </IconButton>
+            <AppearanceSelect />
             <div className="toolbar-divider" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -2088,14 +2069,9 @@ export default function Studio({ projectId }: { projectId: string }) {
                 </label>
                 <label>
                   <span>
-                    Dark mode<small>A quieter studio after dark.</small>
+                    Appearance<small>System follows your computer’s setting.</small>
                   </span>
-                  <Switch
-                    appearance="studio"
-                    aria-label="Dark mode"
-                    checked={dark}
-                    onCheckedChange={setDark}
-                  />
+                  <AppearanceSelect />
                 </label>
                 <label>
                   <span>

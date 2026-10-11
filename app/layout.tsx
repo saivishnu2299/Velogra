@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AppearanceProvider } from "./studio/appearance";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://velogra.saivishnu2299.chatgpt.site"),
@@ -40,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link
           rel="preload"
@@ -50,7 +51,7 @@ export default function RootLayout({
           crossOrigin="anonymous"
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><AppearanceProvider>{children}</AppearanceProvider></body>
     </html>
   );
 }

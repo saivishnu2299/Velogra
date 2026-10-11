@@ -3657,3 +3657,17 @@ kbd {
 .library-topbar .top-actions {
   margin-left: auto;
 }
+
+.appearance-select {
+  max-width: 100px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.appearance-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
