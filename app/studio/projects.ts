@@ -12,6 +12,7 @@ export type Project = {
   template: string;
   version: string;
   updated: number;
+  thumbnail?: { data: string; revision: string };
 };
 export const DEFAULT_PARAMS = { hue: 165, density: 72, speed: 35 };
 let operations: Promise<unknown> = Promise.resolve();

@@ -1,4 +1,5 @@
 import type { Project } from "./projects";
+import { creativeTools } from "./toolkit";
 function scriptText(text: string) {
   return text.replace(/<\/script/gi, "<\\/script");
 }
@@ -10,6 +11,10 @@ export async function prepareRuntime(project: Project) {
   const index =
     project.files.find((f) => f.name === "index.html")?.content ?? "";
   const paths: string[] = [];
+  for (const tool of creativeTools) {
+    if (tool.source && tool.local && index.includes(tool.source))
+      paths.push(tool.local);
+  }
   for (const version of ["2.3.4", "1.11.11"]) {
     if (index.includes("p5@" + version + "/lib/p5"))
       paths.push("/vendor/p5-" + version + ".min.js");
@@ -83,6 +88,9 @@ export function compileProject(
       script.textContent =
         scriptText(file.content) + `\n//# sourceURL=${file.name}`;
     } else if (!standalone) {
+      const tool = creativeTools.find((tool) => tool.source === src);
+      if (tool?.local)
+        script.setAttribute("src", runtimeSources.get(tool.local) ?? src);
       const p5 = src.match(
         /\/p5@([\d.]+)\/lib\/(p5(?:\.min)?\.js|addons\/p5\.sound(?:\.min)?\.js)/,
       );
@@ -177,8 +185,16 @@ function bridge(token: string) {
  window.addEventListener('message',e=>{
   if(e.source!==parent||e.data?.canvasStudio!==__token)return;
   if(e.data.action==='params')Object.assign(window.studio,e.data.params);
-  if(e.data.action==='pause'){window.noLoop?.();window.getAudioContext?.().suspend();}
-  if(e.data.action==='resume'){window.loop?.();window.getAudioContext?.().resume();}
+  if(e.data.action==='pause'){window.noLoop?.();window.getAudioContext?.().suspend();window.gsap?.globalTimeline.pause();}
+  if(e.data.action==='resume'){window.loop?.();window.getAudioContext?.().resume();window.gsap?.globalTimeline.resume();}
+  if(e.data.action==='thumbnail'){
+   try{const source=document.querySelector('canvas');if(!source||!source.width||!source.height)return;
+    const c=document.createElement('canvas');const scale=Math.min(1,480/Math.max(source.width,source.height));c.width=Math.round(source.width*scale);c.height=Math.round(source.height*scale);
+    c.getContext('2d').drawImage(source,0,0,c.width,c.height);let data=c.toDataURL('image/webp',0.75);
+    if(data.length>133000)data=c.toDataURL('image/jpeg',0.45);
+    if(data.length<=133000)window.__report('thumbnail',data,{revision:e.data.revision});
+   }catch{} // Cross-origin images can make a canvas uncapturable; the sketch still works.
+  }
   if(e.data.action==='snapshot'){
    try{const canvas=document.querySelector('canvas');if(!canvas)throw new Error('This sketch has no canvas to capture.');window.__report('snapshot',canvas.toDataURL('image/png'));}
    catch(error){window.__report('error',error.message);}

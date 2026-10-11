@@ -1,4 +1,16 @@
-# vinext-starter
+# Velogra
+
+A local-first p5.js creative studio with ten starter sketches, canvas/code workspaces, saved artwork previews, and a curated creative toolkit.
+
+## Creative studio development
+
+- Run `npm run dev -- --port 3000` for the local preview.
+- Validate with `npm test`, `npm run lint`, `npx tsc --noEmit --incremental false`, and `npm run build`.
+- To regenerate starter artwork and check both supported p5 versions, run `npx tsx scripts/render-starter-previews.ts`, open `http://127.0.0.1:3031`, and click the verification button. The local harness writes images to `public/starters` and results to the ignored `output` folder. Stop it after use.
+- `app/studio/toolkit.ts` defines pinned library sources, local runtime assets, examples, and dependency editing. Include corresponding license files when updating vendored libraries.
+- Project `index.html` remains authoritative for dependencies. Thumbnails are optional cached artwork; project files and parameters remain authoritative. Existing IndexedDB v1 records require no migration.
+
+## Framework foundation
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.
 

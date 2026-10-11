@@ -111,6 +111,10 @@ import {
 } from "./project-archive";
 import { CodeEditor } from "./editor";
 import { VelograMark } from "./brand";
+import { StarterGallery } from "./starter-gallery";
+import { ToolkitPanel } from "./toolkit-panel";
+import { editDependency, switchP5Version } from "./toolkit";
+import { acceptThumbnail, sourceRevision } from "./thumbnails";
 import {
   templates,
   makeProject,
@@ -294,7 +298,13 @@ export default function Studio({ projectId }: { projectId: string }) {
     [saved, setSaved] = useState("Saving…");
   const [dark, setDark] = useState(false),
     [active, setActive] = useState("sketch.js"),
-    [modal, setModal] = useState<Modal>(null);
+    [modal, setModalState] = useState<Modal>(null);
+  const modalTrigger = useRef<HTMLElement | null>(null);
+  const setModal = useCallback((next: Modal) => {
+    if (next && document.activeElement instanceof HTMLElement)
+      modalTrigger.current = document.activeElement;
+    setModalState(next);
+  }, []);
   const [view, setView] = useState<"split" | "canvas" | "code">("canvas"),
     [mobile, setMobile] = useState(false),
     [autoRun, setAutoRun] = useState(false),
@@ -308,17 +318,18 @@ export default function Studio({ projectId }: { projectId: string }) {
     [consoleOpen, setConsoleOpen] = useState(false);
   const [stats, setStats] = useState({ width: 640, height: 640, fps: 0 }),
     [cursor, setCursor] = useState([1, 1]),
-    [controls, setControls] = useState(true),
+    [controls, setControls] = useState(false),
+    [filesOpen, setFilesOpen] = useState(false),
     [fileName, setFileName] = useState(""),
     [fileError, setFileError] = useState(""),
-    [deleteFile, setDeleteFile] = useState<string | null>(null),
-    [libraryURL, setLibraryURL] = useState("");
+    [deleteFile, setDeleteFile] = useState<string | null>(null);
   const iframe = useRef<HTMLIFrameElement>(null),
     upload = useRef<HTMLInputElement>(null),
     token = useRef(""),
     projectRef = useRef<Project | null>(null),
     logId = useRef(0),
     consoleEnd = useRef<HTMLDivElement>(null);
+  const runFiles = useRef("");
   const canvasBounds = useRef<DOMRect | null>(null);
   const canvasMotion = useRef<Animation | null>(null);
   const changeView = (
@@ -414,6 +425,7 @@ export default function Studio({ projectId }: { projectId: string }) {
     try {
       token.current = crypto.randomUUID();
       setLastRun(JSON.stringify(p.files));
+      runFiles.current = JSON.stringify(p.files);
       setLogs([]);
       setStats((s) => ({ ...s, fps: 0 }));
       setRunState("loading");
@@ -475,7 +487,7 @@ export default function Studio({ projectId }: { projectId: string }) {
             ? "sketch.js"
             : (item.files[0]?.name ?? "index.html"),
         );
-        setControls(item.template !== "custom");
+        setControls(false);
         setReady(true);
       })
       .catch(() => {
@@ -572,7 +584,16 @@ export default function Studio({ projectId }: { projectId: string }) {
           height: Math.round(d.height),
           fps: d.fps,
         });
-      else if (d.kind === "snapshot") {
+      else if (d.kind === "thumbnail") {
+        if (
+          navigating.current ||
+          JSON.stringify(projectRef.current?.files) !== runFiles.current
+        )
+          return;
+        setProject((current) =>
+          current ? acceptThumbnail(current, d.revision, d.message) : current,
+        );
+      } else if (d.kind === "snapshot") {
         fetch(d.message)
           .then((r) => r.blob())
           .then((b) =>
@@ -599,6 +620,15 @@ export default function Studio({ projectId }: { projectId: string }) {
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
   }, []);
+  useEffect(() => {
+    if (!["running", "paused"].includes(runState)) return;
+    const timer = setTimeout(() => {
+      const current = projectRef.current;
+      if (current && JSON.stringify(current.files) === runFiles.current)
+        send("thumbnail", { revision: sourceRevision(current) });
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [runState, visualParams, lastRun, send, projectId]);
   useEffect(() => {
     consoleEnd.current?.scrollIntoView({ block: "nearest" });
   }, [logs]);
@@ -854,65 +884,37 @@ export default function Studio({ projectId }: { projectId: string }) {
     setActive(name);
     setModal(null);
   };
-  const addLibrary = (url = libraryURL) => {
+  const changeLibrary = (url: string, remove = false) => {
     try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:") throw new Error();
-      const index = project?.files.find((f) => f.name === "index.html");
-      if (!index) throw new Error();
-      if (index.content.includes(parsed.href)) {
-        toast("This library is already included.");
-        return;
-      }
-      if (!/<\/head>/i.test(index.content)) {
-        toast.error("Add a closing </head> tag to index.html first.");
-        return;
-      }
-      const tag = `    <script src="${parsed.href.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"></script>\n`;
-      update((p) => ({
-        ...p,
-        files: p.files.map((f) =>
-          f.name === "index.html"
-            ? {
-                ...f,
-                content: f.content.replace(/<\/head>/i, tag + "  </head>"),
-              }
-            : f,
-        ),
-      }));
-      setModal(null);
-      setActive("index.html");
-      setTimeout(run, 0);
-      toast.success("Library added to index.html");
-    } catch {
-      toast.error("Enter a valid HTTPS JavaScript library URL.");
+      if (!projectRef.current) return;
+      const next = editDependency(projectRef.current, url, remove);
+      projectRef.current = next;
+      setProject(next);
+      setSaved("Saving…");
+      void run();
+      toast.success(
+        remove
+          ? "Library removed from index.html"
+          : "Library included in index.html",
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
     }
   };
   const changeVersion = (version: string) => {
-    update((p) => ({
-      ...p,
-      version,
-      files: p.files.map((f) =>
-        f.name === "index.html"
-          ? {
-              ...f,
-              content: f.content
-                .replace(
-                  /p5@[\d.]+\/lib\/p5(?:\.min)?\.js/g,
-                  `p5@${version}/lib/p5.min.js`,
-                )
-                .replace(
-                  /<script[^>]*src="[^"]*p5(?:@[^/]+\/lib\/addons|\.sound@[^/]+\/dist)\/p5\.sound(?:\.min)?\.js"[^>]*><\/script>\s*/g,
-                  "",
-                ),
-            }
-          : f,
-      ),
-    }));
-    toast.success(
-      `p5.js ${version} selected. Add matching sound libraries again if needed.`,
-    );
-    setTimeout(run, 0);
+    if (!projectRef.current) return;
+    try {
+      const next = switchP5Version(projectRef.current, version);
+      projectRef.current = next;
+      setProject(next);
+      setSaved("Saving…");
+      void run();
+      toast.success(
+        `p5.js ${version} selected. Sound dependencies updated to match.`,
+      );
+    } catch (error) {
+      toast.error((error as Error).message);
+    }
   };
   const duplicate = () => {
     if (project) void switchProject(cloneProject(project));
@@ -997,7 +999,7 @@ export default function Studio({ projectId }: { projectId: string }) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [run, formatCode, persistProject]);
+  }, [run, formatCode, persistProject, setModal]);
   useEffect(() => {
     type Context = {
       registerTool: (
@@ -1349,11 +1351,14 @@ export default function Studio({ projectId }: { projectId: string }) {
             : "p5.js"}
         </span>
       </div>
-      {currentTemplate && supportsControls && (
+      {currentTemplate && supportsControls && controls && (
         <div className="creative-controls">
           <button
             className="controls-heading"
-            onClick={() => setControls(!controls)}
+            onClick={() => {
+              setControls(false);
+              document.getElementById("studio-controls-toggle")?.focus();
+            }}
             aria-expanded={controls}
           >
             <span>
@@ -1454,7 +1459,7 @@ export default function Studio({ projectId }: { projectId: string }) {
           </div>
         </div>
       )}
-      {ready && (!currentTemplate || !supportsControls) && (
+      {ready && controls && (!currentTemplate || !supportsControls) && (
         <div className="canvas-companion">
           <h3>Make it yours</h3>
           <p>
@@ -1489,7 +1494,7 @@ export default function Studio({ projectId }: { projectId: string }) {
           {dirty
             ? "Code changed. Run to update."
             : logs.length
-              ? `${logs.length} messages`
+              ? `${logs.length} ${logs.length === 1 ? "message" : "messages"}`
               : "No messages"}
         </span>
         {consoleOpen && (
@@ -1588,32 +1593,79 @@ export default function Studio({ projectId }: { projectId: string }) {
         onKeyDownCapture={(event) => {
           if (leaving) event.preventDefault();
         }}
-        className={`studio ${leaving ? "is-navigating" : ""} view-${view} ${reduceMotion ? "reduce-motion" : ""} ${runState === "loading" ? "is-loading" : ""} ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
+        className={`studio art-studio ${filesOpen ? "files-open" : ""} ${leaving ? "is-navigating" : ""} view-${view} ${reduceMotion ? "reduce-motion" : ""} ${runState === "loading" ? "is-loading" : ""} ${dark ? "dark" : ""} ${view === "canvas" && !mobile ? "focus-canvas" : ""}`}
       >
-        <header className="topbar">
-          <div className="brand">
+        <a className="skip-link" href="#creative-workspace">
+          Skip to workspace
+        </a>
+        <header className="topbar studio-header">
+          <button
+            className="brand studio-home"
+            onClick={() => void openProjects()}
+            aria-label="Open project library"
+          >
             <VelograMark className="brand-mark" />
             <strong>velogra</strong>
-            <span className="brand-meta">creative coding studio</span>
-          </div>
-          <button
-            className="nav-button studio-projects-button"
-            onClick={() => void openProjects()}
-            disabled={leaving}
-          >
-            <FolderOpenIcon size={17} /> Projects
           </button>
-          <nav className="main-nav">
-            <button className="nav-button" onClick={() => setModal("gallery")}>
-              Explore
-            </button>
-            <button
-              className="nav-button"
-              onClick={() => setModal("reference")}
-            >
-              Learn
-            </button>
-          </nav>
+          <div className="sketch-heading">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="icon-button sketch-folder"
+                  aria-label="Sketch options"
+                >
+                  <FolderOpenIcon size={20} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => void openProjects()}>
+                  Project library
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => duplicate()}>
+                  Duplicate sketch
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setModal("gallery")}>
+                  Start a new sketch
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="sketch-heading-copy">
+              <input
+                className="workspace-name"
+                aria-label="Sketch name"
+                value={project?.name ?? ""}
+                placeholder="Your next idea"
+                onChange={(e) =>
+                  update((p) => ({ ...p, name: e.target.value.slice(0, 80) }))
+                }
+                onBlur={() => {
+                  if (!project?.name.trim())
+                    update((p) => ({ ...p, name: "Untitled sketch" }));
+                }}
+              />
+              <div
+                className={`workspace-saved ${saved === "Save failed" || saved === "Storage unavailable" ? "save-error" : ""}`}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {saved === "Saved on this device" && <CheckIcon size={11} />}
+                {mobile && saved === "Saved on this device"
+                  ? "Saved locally"
+                  : saved}
+              </div>
+            </div>
+          </div>
+          <Tabs
+            value={view}
+            onValueChange={(v) => changeView(v as "canvas" | "split" | "code")}
+          >
+            <TabsList aria-label="Workspace view">
+              <TabsTrigger value="canvas">Canvas</TabsTrigger>
+              {!mobile && <TabsTrigger value="split">Split</TabsTrigger>}
+              <TabsTrigger value="code">Code</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <div className="top-actions">
             <div className="mobile-studio-menu">
               <DropdownMenu>
@@ -1704,68 +1756,7 @@ export default function Studio({ projectId }: { projectId: string }) {
             </IconButton>
           </div>
         </header>
-        <div className="workspace-bar">
-          <div className="sketch-heading">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  className="icon-button sketch-folder"
-                  aria-label="Sketch options"
-                >
-                  <FolderOpenIcon size={20} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onSelect={() => void openProjects()}>
-                  Project library
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => duplicate()}>
-                  Duplicate sketch
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setModal("gallery")}>
-                  Start a new sketch
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <div className="sketch-heading-copy">
-              <input
-                className="workspace-name"
-                aria-label="Sketch name"
-                value={project?.name ?? ""}
-                placeholder="Your next idea"
-                onChange={(e) =>
-                  update((p) => ({ ...p, name: e.target.value.slice(0, 80) }))
-                }
-                onBlur={() => {
-                  if (!project?.name.trim())
-                    update((p) => ({ ...p, name: "Untitled sketch" }));
-                }}
-              />
-              <div
-                className={`workspace-saved ${saved === "Save failed" || saved === "Storage unavailable" ? "save-error" : ""}`}
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                {saved === "Saved on this device" && <CheckIcon size={11} />}
-                {mobile && saved === "Saved on this device"
-                  ? "Saved locally"
-                  : saved}
-              </div>
-            </div>
-          </div>
-          <Tabs
-            value={view}
-            onValueChange={(v) => changeView(v as "canvas" | "split" | "code")}
-          >
-            <TabsList aria-label="Workspace view">
-              <TabsTrigger value="canvas">Canvas</TabsTrigger>
-              {!mobile && <TabsTrigger value="split">Split</TabsTrigger>}
-              <TabsTrigger value="code">Code</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-        <div className="studio-body">
+        <div className="studio-body" id="creative-workspace">
           <SidebarProvider
             className="workspace-provider"
             style={{ "--sidebar-width": "210px" } as React.CSSProperties}
@@ -1775,6 +1766,16 @@ export default function Studio({ projectId }: { projectId: string }) {
                 <SidebarGroup className="file-group">
                   <div className="section-label">
                     Files & assets
+                    <button
+                      className="icon-button close-files"
+                      aria-label="Close files"
+                      onClick={() => {
+                        setFilesOpen(false);
+                        document.getElementById("studio-files-toggle")?.focus();
+                      }}
+                    >
+                      ×
+                    </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
@@ -1810,7 +1811,9 @@ export default function Studio({ projectId }: { projectId: string }) {
                           isActive={f.name === active}
                           onClick={() => {
                             setActive(f.name);
-                            if (mobile) changeView("code");
+                            if (view === "canvas")
+                              changeView(mobile ? "code" : "split");
+                            if (mobile) setFilesOpen(false);
                           }}
                         >
                           <FileSymbol name={f.name} />
@@ -1852,7 +1855,6 @@ export default function Studio({ projectId }: { projectId: string }) {
                   <button
                     className="subtle-button add-library"
                     onClick={() => {
-                      setLibraryURL("");
                       setModal("library");
                     }}
                   >
@@ -1899,7 +1901,39 @@ export default function Studio({ projectId }: { projectId: string }) {
           </SidebarProvider>
         </div>
         <footer className="statusbar">
-          <div>
+          <div className="studio-tool-dock">
+            <button
+              id="studio-files-toggle"
+              aria-pressed={filesOpen}
+              onClick={() => setFilesOpen(!filesOpen)}
+            >
+              <FolderOpenIcon size={17} />
+              Files
+            </button>
+            <button
+              id="studio-controls-toggle"
+              aria-pressed={controls}
+              onClick={() => {
+                setControls(!controls);
+                if (view === "code") changeView("canvas");
+              }}
+            >
+              <SlidersHorizontalIcon size={17} />
+              Controls
+            </button>
+            <button onClick={() => setModal("library")}>
+              <PlusIcon size={17} />
+              Toolkit
+            </button>
+            <button
+              className="dock-explore"
+              onClick={() => setModal("gallery")}
+            >
+              <SparkleIcon size={17} />
+              Explore
+            </button>
+          </div>
+          <div className="runtime-status">
             <span className="p5-label">
               p5.js {project?.version ?? P5_LATEST}
             </span>
@@ -1952,7 +1986,13 @@ export default function Studio({ projectId }: { projectId: string }) {
           }}
         >
           <DialogContent
-            className={`studio-dialog ${modal === "gallery" ? "gallery-dialog" : ""} ${modal === "commands" ? "command-dialog" : ""}`}
+            onCloseAutoFocus={(event) => {
+              if (modalTrigger.current?.isConnected) {
+                event.preventDefault();
+                modalTrigger.current.focus();
+              }
+            }}
+            className={`studio-dialog ${modal === "library" ? "toolkit-dialog" : ""} ${modal === "gallery" ? "gallery-dialog" : ""} ${modal === "commands" ? "command-dialog" : ""}`}
           >
             <DialogHeader>
               <DialogTitle>
@@ -1964,7 +2004,7 @@ export default function Studio({ projectId }: { projectId: string }) {
                       settings: "Your studio, your way.",
                       addfile: "Add a file",
                       rename: "Rename file",
-                      library: "More possibilities.",
+                      library: "A few more possibilities.",
                       commands: "What would you like to do?",
                     } as Record<string, string>
                   )[modal ?? ""]
@@ -1984,7 +2024,7 @@ export default function Studio({ projectId }: { projectId: string }) {
                       rename:
                         "Update references to this file in your sketch after renaming.",
                       library:
-                        "Add sound or any browser-compatible JavaScript library.",
+                        "Choose a tool. Give your idea another dimension.",
                       commands:
                         "Search actions or use the shortcuts you already know.",
                     } as Record<string, string>
@@ -1993,27 +2033,7 @@ export default function Studio({ projectId }: { projectId: string }) {
               </DialogDescription>
             </DialogHeader>
             {modal === "gallery" && (
-              <div className="gallery-grid">
-                {templates.map((t) => (
-                  <button
-                    className="template-card"
-                    key={t.id}
-                    onClick={() => newSketch(t)}
-                  >
-                    <TemplatePreview template={t} />
-                    <div className="template-copy">
-                      <h3>{t.name}</h3>
-                      <p>{t.description}</p>
-                      <span className="template-use">
-                        <span className="template-category">{t.category}</span>
-                        <span>
-                          Use template <PlusIcon size={15} />
-                        </span>
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+              <StarterGallery expanded busy={leaving} onSelect={newSketch} />
             )}
             {modal === "reference" && (
               <>
@@ -2174,49 +2194,14 @@ export default function Studio({ projectId }: { projectId: string }) {
                 </button>
               </form>
             )}
-            {modal === "library" && (
-              <div className="library-panel">
-                <button
-                  className="library-preset"
-                  onClick={() =>
-                    addLibrary(
-                      project?.version === P5_LEGACY
-                        ? `https://cdn.jsdelivr.net/npm/p5@${P5_LEGACY}/lib/addons/p5.sound.min.js`
-                        : "https://cdn.jsdelivr.net/npm/p5.sound@0.4.1/dist/p5.sound.min.js",
-                    )
-                  }
-                >
-                  <span>
-                    <strong>p5.sound</strong>
-                    <small>Audio, synthesis, and sound analysis.</small>
-                  </span>
-                  <PlusIcon size={18} />
-                </button>
-                <form
-                  className="file-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    addLibrary();
-                  }}
-                >
-                  <label htmlFor="library-url">JavaScript library URL</label>
-                  <input
-                    id="library-url"
-                    type="url"
-                    placeholder="https://…/library.min.js"
-                    value={libraryURL}
-                    onChange={(e) => setLibraryURL(e.target.value)}
-                    required
-                  />
-                  <p>
-                    Adds a script to index.html, after p5.js. For module
-                    libraries, edit your HTML directly.
-                  </p>
-                  <button className="primary-button" type="submit">
-                    Add library
-                  </button>
-                </form>
-              </div>
+            {modal === "library" && project && (
+              <ToolkitPanel
+                project={project}
+                onChange={changeLibrary}
+                onExample={(id) =>
+                  newSketch(templates.find((template) => template.id === id)!)
+                }
+              />
             )}
             {modal === "commands" && (
               <Command>
@@ -2274,82 +2259,5 @@ export default function Studio({ projectId }: { projectId: string }) {
         />
       </main>
     </TooltipProvider>
-  );
-}
-
-function TemplatePreview({ template }: { template: Template }) {
-  const [src, setSrc] = useState("");
-  useEffect(() => {
-    const p = makeProject(template);
-    p.params.speed = 0;
-    p.params.density = 40;
-    if (template.sound)
-      p.files = p.files.map((f) =>
-        f.name === "sketch.js"
-          ? {
-              ...f,
-              content: f.content.replace(
-                "oscillator = new p5.Oscillator('sine');",
-                "oscillator = {amp(){},start(){},freq(){}};",
-              ),
-            }
-          : f,
-      );
-    p.files = p.files.map((f) =>
-      f.name === "sketch.js"
-        ? {
-            ...f,
-            content:
-              (template.id === "blank"
-                ? f.content.replace(
-                    "circle(mouseX, mouseY, density)",
-                    "circle(width / 2, height / 2, density)",
-                  )
-                : template.id === "brush"
-                  ? f.content
-                      .replace(
-                        "if (mouseIsPressed && mouseX >= 0 && mouseX <= width)",
-                        "if (true)",
-                      )
-                      .replace(
-                        "line(pmouseX, pmouseY, mouseX, mouseY)",
-                        "line(160 + frameCount * 6, 320 + sin(frameCount * 0.25) * 80, 166 + frameCount * 6, 320 + sin((frameCount + 1) * 0.25) * 80)",
-                      )
-                  : f.content) +
-              "\nconst previewDraw = draw; draw = function() { previewDraw(); if (frameCount >= 32) noLoop(); };",
-          }
-        : f,
-    );
-    let alive = true;
-    prepareRuntime(p)
-      .then(() => {
-        if (alive) setSrc(compileProject(p, "gallery-" + template.id));
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [template]);
-  return (
-    <div
-      className="template-preview"
-      style={{
-        borderBottomColor: template.color,
-        background: ["blank", "brush"].includes(template.id)
-          ? "#ebedf5"
-          : "#12151a",
-      }}
-    >
-      {src && (
-        <iframe
-          title={`${template.name} preview`}
-          sandbox="allow-scripts"
-          srcDoc={src}
-          tabIndex={-1}
-          loading="lazy"
-        />
-      )}
-      <div className="template-overlay" />
-    </div>
   );
 }

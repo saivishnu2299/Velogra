@@ -61,7 +61,9 @@ export function projectZIP(project: Project): Blob {
     files["index.html"] = strToU8(
       index.content.replace(
         /<head([^>]*)>/i,
-        `<head$1>\n<script>window.studio=${JSON.stringify(project.params)};</script>`,
+        // Standalone defaults must not overwrite the runtime's current controls
+        // when this archive is imported and edited again in Velogra.
+        `<head$1>\n<script>window.studio ??= ${JSON.stringify(project.params)};</script>`,
       ),
     );
   }

@@ -1,4 +1,5 @@
 import { DEFAULT_PARAMS, type Project } from "./projects";
+import { addScript, creativeTools, toolSource } from "./toolkit";
 export const P5_LATEST = "2.3.4";
 export const P5_LEGACY = "1.11.11";
 export const html = (version = P5_LATEST) => `<!DOCTYPE html>
@@ -77,6 +78,7 @@ export type Template = {
   color: string;
   code: string;
   sound?: boolean;
+  tool?: string;
 };
 export const templates: Template[] = [
   {
@@ -231,6 +233,147 @@ function mouseReleased() {
 `,
   },
   {
+    id: "gravity",
+    name: "Gravity garden",
+    category: "PHYSICS",
+    description: "A small world of falling, colliding color.",
+    tip: "Click to drop a new shape. Motion changes gravity; detail changes its size.",
+    color: "#dfa284",
+    tool: "matter",
+    code: `// Matter handles physics. p5 handles the drawing.
+let engine, shapes = [];
+function setup() {
+  createCanvas(640, 640);
+  colorMode(HSB, 360, 100, 100);
+  randomSeed(12);
+  engine = Matter.Engine.create();
+  const walls = [
+    Matter.Bodies.rectangle(320, 610, 640, 40, {isStatic: true}),
+    Matter.Bodies.rectangle(-10, 320, 20, 640, {isStatic: true}),
+    Matter.Bodies.rectangle(650, 320, 20, 640, {isStatic: true})
+  ];
+  Matter.Composite.add(engine.world, walls);
+  for (let i = 0; i < 24; i++) drop(random(60,580), random(40,480));
+}
+function drop(x,y) {
+  const radius = window.studio.density / 4;
+  const body = Matter.Bodies.circle(x,y,radius,{restitution:0.65});
+  shapes.push(body);
+  Matter.Composite.add(engine.world, body);
+  if(shapes.length > 100) Matter.Composite.remove(engine.world, shapes.shift());
+}
+function draw() {
+  background(35, 9, 94);
+  const {hue, speed} = window.studio;
+  engine.gravity.y = speed / 45;
+  Matter.Engine.update(engine, Math.min(deltaTime, 33));
+  noStroke();
+  shapes.forEach((body,i) => {
+    fill((hue + i*9)%360, 45, 72);
+    circle(body.position.x,body.position.y,body.circleRadius*2);
+  });
+  stroke(30,12,65); line(40,590,600,590);
+}
+function mousePressed() {
+  if(mouseX>=0 && mouseX<=width && mouseY>=0 && mouseY<=height) drop(mouseX,mouseY);
+}
+`,
+  },
+  {
+    id: "palette",
+    name: "Palette field",
+    category: "COLOR",
+    description: "Color finding its way between warm and cool.",
+    tip: "Move your pointer to bend the field. Color shifts the palette; detail changes the grid.",
+    color: "#d7bc72",
+    tool: "chroma",
+    code: `// Lab interpolation makes beautifully smooth color transitions.
+let time = 0;
+function setup() { createCanvas(640, 640); noStroke(); }
+function draw() {
+  const {hue,density,speed} = window.studio;
+  const palette = chroma.scale([
+    chroma.hsl(hue,0.45,0.23), '#f4dfb2', chroma.hsl((hue+150)%360,0.65,0.58)
+  ]).mode('lab');
+  background('#f0ede5');
+  const count = Math.round(map(density,12,120,5,24));
+  const cell = 544/count;
+  for(let y=0;y<count;y++) for(let x=0;x<count;x++) {
+    const wave = sin(x*0.4+y*0.25+time+mouseX/300);
+    fill(palette((wave+1)/2).hex());
+    rect(48+x*cell,48+y*cell,cell-3,cell-3,cell*0.2);
+  }
+  time += speed*0.0005;
+}
+`,
+  },
+  {
+    id: "elastic",
+    name: "Elastic rhythm",
+    category: "MOTION",
+    description: "A choreography of shapes that stretch and settle.",
+    tip: "Motion sets the tempo. Change color and detail to compose a different rhythm.",
+    color: "#a4acdf",
+    tool: "gsap",
+    code: `// GSAP animates plain objects; p5 turns those values into art.
+let dancers = [];
+function setup() {
+  createCanvas(640,640);
+  colorMode(HSB,360,100,100);
+  for(let i=0;i<12;i++) {
+    const dancer={stretch:0};
+    dancers.push(dancer);
+    gsap.to(dancer,{stretch:1,duration:2,ease:'elastic.out(1,0.45)',repeat:-1,yoyo:true,delay:i*0.12,repeatDelay:0.5});
+  }
+}
+function draw() {
+  const {hue,density,speed}=window.studio;
+  gsap.globalTimeline.timeScale(speed/35);
+  background(235,20,12);
+  noStroke();
+  dancers.forEach((d,i)=>{
+    fill((hue+i*7)%360,45,88);
+    const h=35+d.stretch*(density*2.8);
+    rect(54+i*45,320-h/2,27,h,14);
+  });
+}
+`,
+  },
+  {
+    id: "liquid",
+    name: "Liquid light",
+    category: "SHADERS",
+    description: "An iridescent surface, painted one pixel at a time.",
+    tip: "Move your pointer to bend the light. Open Code to explore the fragment shader.",
+    color: "#bfa5d4",
+    code: `// A fragment shader runs once for every pixel of the canvas.
+let paint, time = 0;
+const vertex = 'attribute vec3 aPosition; attribute vec2 aTexCoord; varying vec2 uv; void main(){uv=aTexCoord; gl_Position=vec4(aPosition.xy*2.0-1.0,0.0,1.0);}';
+const fragment = \`precision mediump float;
+varying vec2 uv;
+uniform float time, hue, detail;
+uniform vec2 pointer;
+void main() {
+  vec2 p = uv*2.0-1.0;
+  float wave = sin(p.x*detail+time)+cos(p.y*detail-time);
+  wave += sin(length(p-pointer)*6.0-time*1.5);
+  vec3 color = 0.52+0.42*cos(6.2831*(wave*0.16+hue+vec3(0.0,0.18,0.4)));
+  gl_FragColor = vec4(color*(0.7+0.3*cos(wave)),1.0);
+}\`;
+function setup(){ createCanvas(640,640,WEBGL); paint=createShader(vertex,fragment); noStroke(); }
+function draw(){
+  const {hue,density,speed}=window.studio;
+  shader(paint);
+  paint.setUniform('time',time);
+  paint.setUniform('hue',hue/360);
+  paint.setUniform('detail',density/16);
+  paint.setUniform('pointer',[mouseX/width-0.5,mouseY/height-0.5]);
+  rect(-width/2,-height/2,width,height);
+  time+=speed*0.0008;
+}
+`,
+  },
+  {
     id: "blank",
     name: "An open canvas",
     category: "FROM SCRATCH",
@@ -264,6 +407,10 @@ export function makeProject(template = templates[0]): Project {
       "  </head>",
       `    <script src="https://cdn.jsdelivr.net/npm/p5@${version}/lib/addons/p5.sound.min.js"></script>\n  </head>`,
     );
+  if (template.tool) {
+    const tool = creativeTools.find((tool) => tool.id === template.tool)!;
+    index = addScript(index, toolSource(tool, version)!);
+  }
   return {
     id: crypto.randomUUID(),
     name: template.name,
@@ -277,4 +424,34 @@ export function makeProject(template = templates[0]): Project {
       { name: "style.css", content: css },
     ],
   };
+}
+
+// Demonstration gestures keep drawing-starter previews useful without user input.
+export function makeStarterPreview(template: Template): Project {
+  const project = makeProject(template);
+  if (template.id === "brush" || template.id === "blank") {
+    project.files = project.files.map((file) =>
+      file.name !== "sketch.js"
+        ? file
+        : {
+            ...file,
+            content:
+              template.id === "blank"
+                ? file.content.replace(
+                    "circle(mouseX, mouseY, density)",
+                    "circle(width / 2, height / 2, density)",
+                  )
+                : file.content
+                    .replace(
+                      "if (mouseIsPressed && mouseX >= 0 && mouseX <= width)",
+                      "if (frameCount < 70)",
+                    )
+                    .replace(
+                      "line(pmouseX, pmouseY, mouseX, mouseY)",
+                      "line(100+(frameCount-1)*6,320+sin((frameCount-1)*0.1)*90,100+frameCount*6,320+sin(frameCount*0.1)*90)",
+                    ),
+          },
+    );
+  }
+  return project;
 }

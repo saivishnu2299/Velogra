@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type MouseEvent,
 } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -21,7 +20,6 @@ import {
   DownloadSimpleIcon,
   TrashIcon,
   ArrowUpRightIcon,
-  SparkleIcon,
   MoonIcon,
   SunIcon,
   CheckIcon,
@@ -58,11 +56,12 @@ import {
   saveProject,
   type Project,
 } from "./projects";
-import { templates, makeProject } from "./templates";
+import { templates, makeProject, type Template } from "./templates";
+import { StarterArt, StarterGallery } from "./starter-gallery";
+import Image from "next/image";
 import { exportProjectZIP, importProjectZIP } from "./project-archive";
 
-type ProjectDialog =
-  { kind: "create" } | { kind: "rename"; project: Project } | null;
+type ProjectDialog = { kind: "rename"; project: Project } | null;
 
 export default function ProjectLibrary() {
   const router = useRouter();
@@ -78,7 +77,6 @@ export default function ProjectLibrary() {
   const returnFocus = useRef<HTMLElement | null>(null);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
   const [name, setName] = useState("");
-  const [starter, setStarter] = useState("blank");
   const [formError, setFormError] = useState("");
   const [deleting, setDeleting] = useState<Project | null>(null);
   const [busy, setBusy] = useState(false);
@@ -151,13 +149,16 @@ export default function ProjectLibrary() {
     }
   };
 
-  const create = (event: MouseEvent<HTMLButtonElement>) => {
-    returnFocus.current = event.currentTarget;
-    setName("Untitled project");
-    setStarter("blank");
-    setFormError("");
-    setDialog({ kind: "create" });
-  };
+  const start = (template: Template) =>
+    void perform(async () => {
+      const project = makeProject(template);
+      if (template.id === "blank") project.name = "Untitled sketch";
+      await saveProject(project);
+      opening.current = true;
+      router.push(`/studio/${encodeURIComponent(project.id)}`);
+    });
+  const create = () =>
+    start(templates.find((template) => template.id === "blank")!);
   const rename = (project: Project) => {
     returnFocus.current = document.getElementById(
       `project-options-${project.id}`,
@@ -175,27 +176,17 @@ export default function ProjectLibrary() {
     }
     if (!dialog) return;
     void perform(async () => {
-      if (dialog.kind === "create") {
-        const project = makeProject(
-          templates.find((template) => template.id === starter)!,
-        );
-        project.name = trimmed;
-        await saveProject(project);
-        opening.current = true;
-        router.push(`/studio/${encodeURIComponent(project.id)}`);
-      } else {
-        const project = {
-          ...dialog.project,
-          name: trimmed,
-          updated: Date.now(),
-        };
-        await saveProject(project);
-        setProjects((items) =>
-          items.map((item) => (item.id === project.id ? project : item)),
-        );
-        setDialog(null);
-        toast.success("Project renamed");
-      }
+      const project = {
+        ...dialog.project,
+        name: trimmed,
+        updated: Date.now(),
+      };
+      await saveProject(project);
+      setProjects((items) =>
+        items.map((item) => (item.id === project.id ? project : item)),
+      );
+      setDialog(null);
+      toast.success("Project renamed");
     });
   };
   const duplicate = (project: Project) =>
@@ -233,12 +224,15 @@ export default function ProjectLibrary() {
     .sort((a, b) =>
       sort === "name" ? a.name.localeCompare(b.name) : b.updated - a.updated,
     );
-  const starters = [...templates].sort(
-    (a, b) => Number(b.id === "blank") - Number(a.id === "blank"),
-  );
 
   return (
-    <main className={`project-library ${dark ? "dark" : ""}`} aria-busy={busy}>
+    <main
+      className={`project-library art-library ${projects.length ? "has-projects" : ""} ${dark ? "dark" : ""}`}
+      aria-busy={busy}
+    >
+      <a className="skip-link" href="#projects-heading">
+        Skip to studio
+      </a>
       <header className="topbar library-topbar">
         <Link href="/" className="brand" aria-label="Velogra projects">
           <VelograMark className="brand-mark" />
@@ -261,31 +255,68 @@ export default function ProjectLibrary() {
       <section className="library-content" aria-labelledby="projects-heading">
         <div className="library-heading">
           <div>
-            <span className="library-eyebrow">YOUR STUDIO</span>
-            <h1 id="projects-heading">Your projects</h1>
+            <span className="library-eyebrow">
+              A SPACE FOR CREATIVE CURIOSITY
+            </span>
+            <h1 id="projects-heading">
+              {projects.length ? (
+                "Back to your studio."
+              ) : (
+                <>
+                  Make something
+                  <br />
+                  <em>unexpected.</em>
+                </>
+              )}
+            </h1>
             <p>
-              A place for your ideas to take shape. Saved in this browser, on
-              this device.
+              {projects.length
+                ? "Pick up a thread, or follow a new one."
+                : "A little code. A new perspective. Follow an idea and see where it takes you."}
             </p>
+            <div className="library-actions">
+              <button
+                className="outline-button"
+                disabled={busy || status !== "ready"}
+                onClick={() => upload.current?.click()}
+              >
+                <UploadSimpleIcon size={17} /> Import ZIP
+              </button>
+              <button
+                id="new-project"
+                className="primary-button"
+                disabled={busy || status !== "ready"}
+                onClick={create}
+              >
+                <PlusIcon size={17} /> Blank sketch
+              </button>
+            </div>
           </div>
-          <div className="library-actions">
-            <button
-              className="outline-button"
-              disabled={busy || status !== "ready"}
-              onClick={() => upload.current?.click()}
-            >
-              <UploadSimpleIcon size={17} /> Import ZIP
-            </button>
-            <button
-              id="new-project"
-              className="primary-button"
-              disabled={busy || status !== "ready"}
-              onClick={create}
-            >
-              <PlusIcon size={17} /> New project
-            </button>
-          </div>
+          <button
+            className="welcome-art"
+            onClick={() => start(templates[0])}
+            disabled={busy || status !== "ready"}
+            aria-label="Start featured Chromatic orbit"
+          >
+            <StarterArt template={templates[0]} />
+            <span>
+              <span>STUDY 001 / CHROMATIC ORBIT</span>
+              <ArrowUpRightIcon size={18} />
+            </span>
+          </button>
         </div>
+        {status === "ready" && projects.length === 0 && (
+          <StarterGallery onSelect={start} busy={busy} />
+        )}
+        {status === "ready" && projects.length > 0 && (
+          <div className="collection-heading projects-title">
+            <div>
+              <span className="eyebrow">PICK UP A THREAD</span>
+              <h2>Your sketches</h2>
+            </div>
+            <span className="device-note">Saved in this browser</span>
+          </div>
+        )}
         {status === "ready" && projects.length > 0 && (
           <div className="library-toolbar">
             <div className="library-search">
@@ -339,19 +370,12 @@ export default function ProjectLibrary() {
             </button>
           </div>
         ) : projects.length === 0 ? (
-          <div className="library-empty">
-            <div className="library-empty-mark">
-              <VelograMark />
-            </div>
-            <h2>Your next idea starts here.</h2>
+          <div className="first-studio-note">
+            <FolderOpenIcon size={18} />
             <p>
-              Create a project from a blank canvas or a starter sketch.
-              <br />
-              Already have something? Import a project ZIP.
+              Your sketches will live here. Start with a study above, or open a
+              blank canvas.
             </p>
-            <button className="primary-button" onClick={create} disabled={busy}>
-              <PlusIcon size={17} /> Create your first project
-            </button>
           </div>
         ) : visible.length === 0 ? (
           <div className="library-empty">
@@ -370,17 +394,30 @@ export default function ProjectLibrary() {
               );
               return (
                 <article className="library-card" key={project.id}>
+                  <button
+                    className="project-art"
+                    disabled={busy}
+                    onClick={() =>
+                      router.push(`/studio/${encodeURIComponent(project.id)}`)
+                    }
+                    aria-label={`Open artwork ${project.name}`}
+                  >
+                    {project.thumbnail ? (
+                      <Image
+                        src={project.thumbnail.data}
+                        alt={`Last captured artwork for ${project.name}`}
+                        fill
+                        unoptimized
+                        sizes="(max-width: 600px) 90vw, 33vw"
+                      />
+                    ) : (
+                      <span className="project-art-placeholder">
+                        <VelograMark />
+                        <span>Ready for your next idea</span>
+                      </span>
+                    )}
+                  </button>
                   <div className="library-card-heading">
-                    <span
-                      className="library-project-icon"
-                      style={
-                        {
-                          "--project-accent": template?.color ?? "#b4b8be",
-                        } as React.CSSProperties
-                      }
-                    >
-                      <SparkleIcon size={22} />
-                    </span>
                     <span className="library-template">
                       {template?.category ?? "IMPORTED"}
                     </span>
@@ -475,6 +512,15 @@ export default function ProjectLibrary() {
             })}
           </div>
         )}
+        {status === "ready" && projects.length > 0 && (
+          <StarterGallery onSelect={start} busy={busy} />
+        )}
+        <footer className="library-footer">
+          <span>velogra / code becomes form</span>
+          <span>
+            Your work stays on this device. Export a ZIP to take it with you.
+          </span>
+        </footer>
       </section>
       <input
         ref={upload}
@@ -495,7 +541,7 @@ export default function ProjectLibrary() {
         }}
       >
         <DialogContent
-          className={`studio-dialog ${dialog?.kind === "create" ? "new-project-dialog" : ""}`}
+          className="studio-dialog"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             returnFocus.current?.focus();
@@ -508,15 +554,9 @@ export default function ProjectLibrary() {
           }}
         >
           <DialogHeader>
-            <DialogTitle>
-              {dialog?.kind === "create"
-                ? "Start something new."
-                : "Rename project"}
-            </DialogTitle>
+            <DialogTitle>Rename sketch</DialogTitle>
             <DialogDescription>
-              {dialog?.kind === "create"
-                ? "Give your idea a name and a place to begin."
-                : "Choose a name that makes this project easy to find."}
+              Choose a name that makes this sketch easy to find.
             </DialogDescription>
           </DialogHeader>
           <form className="project-form" onSubmit={submit}>
@@ -534,31 +574,6 @@ export default function ProjectLibrary() {
               }}
               autoFocus
             />
-            {dialog?.kind === "create" && (
-              <fieldset className="project-starters" disabled={busy}>
-                <legend>Start with</legend>
-                <div className="starter-grid">
-                  {starters.map((template) => (
-                    <button
-                      key={template.id}
-                      type="button"
-                      aria-pressed={starter === template.id}
-                      onClick={() => setStarter(template.id)}
-                    >
-                      <span className="starter-heading">
-                        <strong>
-                          {template.id === "blank"
-                            ? "Blank sketch"
-                            : template.name}
-                        </strong>
-                        {starter === template.id && <CheckIcon size={17} />}
-                      </span>
-                      <small>{template.description}</small>
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-            )}
             {formError && (
               <p id="project-form-error" className="form-error" role="alert">
                 {formError}
@@ -574,11 +589,7 @@ export default function ProjectLibrary() {
                 Cancel
               </button>
               <button type="submit" className="primary-button" disabled={busy}>
-                {busy
-                  ? "Saving…"
-                  : dialog?.kind === "create"
-                    ? "Create project"
-                    : "Save name"}
+                {busy ? "Saving…" : "Save name"}
               </button>
             </div>
           </form>
