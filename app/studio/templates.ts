@@ -1,3 +1,4 @@
+import { moreTemplates } from "./more-templates";
 import { DEFAULT_PARAMS, type Project } from "./projects";
 import { addScript, creativeTools, toolSource } from "./toolkit";
 export const P5_LATEST = "2.3.4";
@@ -373,6 +374,7 @@ function draw(){
 }
 `,
   },
+  ...moreTemplates,
   {
     id: "blank",
     name: "An open canvas",

@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { ArrowUpRightIcon, ArrowRightIcon } from "@phosphor-icons/react";
 import { templates, makeStarterPreview, type Template } from "./templates";
+import { featuredStarters, nextFeaturedOffset } from "./featured-starters";
 import { compileProject, prepareRuntime } from "./runtime";
 
 function subscribeMotion(listener: () => void) {
@@ -85,12 +86,45 @@ export function StarterGallery({
   const [all, setAll] = useState(expanded);
   const [category, setCategory] = useState("All");
   const [active, setActive] = useState<string | null>(null);
-  const featured = ["orbit", "gravity", "palette", "liquid"];
+  const [offset, setOffset] = useState(0);
+  useEffect(() => {
+    if (expanded) return;
+    let alive = true;
+    queueMicrotask(() => {
+      if (!alive) return;
+      let start = 0;
+      try {
+        start = Number(localStorage.getItem("velogra-featured-offset") ?? 0);
+      } catch {}
+      if (!Number.isSafeInteger(start) || start < 0) start = 0;
+      setOffset(start);
+      try {
+        localStorage.setItem(
+          "velogra-featured-offset",
+          String(nextFeaturedOffset(start)),
+        );
+      } catch {}
+    });
+    return () => {
+      alive = false;
+    };
+  }, [expanded]);
+  const cycleFeatured = () => {
+    const next = nextFeaturedOffset(offset);
+    setOffset(next);
+    setActive(null);
+    try {
+      localStorage.setItem(
+        "velogra-featured-offset",
+        String(nextFeaturedOffset(next)),
+      );
+    } catch {}
+  };
   const visible = all
     ? templates.filter(
         (template) => category === "All" || template.category === category,
       )
-    : featured.map((id) => templates.find((template) => template.id === id)!);
+    : featuredStarters(offset);
   return (
     <section className="starter-collection" aria-label="Starter sketches">
       <div className="collection-heading">
@@ -98,6 +132,15 @@ export function StarterGallery({
           <span className="eyebrow">A FEW POSSIBILITIES</span>
           <h2>Start somewhere.</h2>
         </div>
+        {!all && (
+          <button
+            className="text-action"
+            onClick={cycleFeatured}
+            disabled={busy}
+          >
+            More inspiration <ArrowRightIcon size={16} />
+          </button>
+        )}
         {!expanded && (
           <button
             className="text-action"
@@ -107,7 +150,7 @@ export function StarterGallery({
             }}
             aria-expanded={all}
           >
-            {all ? "Show featured" : "Browse all 10"}
+            {all ? "Show featured" : `Browse all ${templates.length}`}
             <ArrowRightIcon size={16} />
           </button>
         )}

@@ -1,6 +1,6 @@
 # Velogra
 
-A local-first p5.js creative studio with ten starter sketches, canvas/code workspaces, saved artwork previews, and a curated creative toolkit.
+A local-first p5.js creative studio with twenty starter sketches, canvas/code workspaces, saved artwork previews, and a curated creative toolkit.
 
 ## Creative studio development
 

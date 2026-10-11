@@ -76,9 +76,9 @@ test("invalid dependencies fail without changing projects", () => {
   );
 });
 
-test("ten starters declare the appropriate dependencies and audio version", () => {
-  assert.equal(templates.length, 10);
-  assert.equal(new Set(templates.map((template) => template.id)).size, 10);
+test("twenty starters declare the appropriate dependencies and audio version", () => {
+  assert.equal(templates.length, 20);
+  assert.equal(new Set(templates.map((template) => template.id)).size, 20);
   for (const template of templates) {
     const project = makeProject(template);
     assert.equal(project.version, template.sound ? P5_LEGACY : P5_LATEST);
