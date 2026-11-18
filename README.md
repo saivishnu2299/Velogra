@@ -1,6 +1,10 @@
 # Velogra
 
-A local-first p5.js creative studio with twenty starter sketches, canvas/code workspaces, saved artwork previews, and a curated creative toolkit.
+A local-first studio for creative coding with p5.js. Start with one of 20 sketches, work in canvas or code view, and save your projects in your browser.
+
+[Open Velogra](https://velogra.saivishnu2299.chatgpt.site)
+
+![Velogra launch artwork showing a luminous wireframe sphere beside the words “Code becomes form.”](public/og.png)
 
 ## Creative studio development
 
